@@ -24,6 +24,7 @@ dev = [
     "hypothesis",
     "pip-audit",
     "deptry",
+    "pytest-socket>=0.8.1",
 ]
 
 [tool.ruff]
@@ -50,9 +51,7 @@ addopts = [
     "--cov=pypiscan",
     "--cov-branch",
     "--cov-report=term-missing",
-]
-markers = [
-    "network: tests that require network access (deselected in CI)",
+    "--disable-socket",
 ]
 
 [tool.coverage.run]

@@ -98,10 +98,11 @@ decision before any code is written. Done items are marked ✓.
   description.
 - **0.2** ✓ Pyright strict mode for all of `src/pypiscan` instead of a file
   list; raise the coverage threshold to 90%.
-- **0.3** pytest-socket: tests fail if they touch the network unless marked
-  `network`. **← current**
+- **0.3** ✓ pytest-socket blocks all network access in tests, with no
+  per-test opt-out: a collection hook rejects its `enable_socket` marker and
+  `socket_enabled` fixture.
 - **0.4** A pull request template: summary, manual-check output, and a
-  checkbox for "touches CI, `check.sh` or tool configuration".
+  checkbox for "touches CI, `check.sh` or tool configuration". **← current**
 - **0.5** *(optional; a GitHub settings change made by the maintainer, not
   code, so the "current" marker skips it)* Branch protection on `main`:
   require a pull request, require all CI checks to pass, block force pushes.
@@ -212,8 +213,12 @@ Manual checks for 2.1–2.4 compare results against Pillow 12.3.0's
 - ELF parsing uses pyelftools, not `readelf` or `nm`, so the tool behaves the
   same on macOS and Linux.
 - Tests build synthetic wheels in `tmp_path`. No real wheels or binaries are
-  committed. Tests don't use the network; any that must are marked `network`
-  and deselected in CI.
+  committed.
+- Tests never touch the network, and there is no per-test escape hatch. Code
+  that talks to PyPI, NVD or OSV is tested with recorded responses injected
+  at the HTTP-client layer, not through a local server. Anything that
+  genuinely needs a live network is an end-to-end check that lives outside
+  the pytest suite.
 - Wheels for manual checks are downloaded with `uvx pip download`, since uv
   virtual environments don't include pip. For example:
 
