@@ -12,11 +12,11 @@ uv run ruff format --check
 uv run pyright
 
 # test (coverage wired via pyproject addopts)
-uv run pytest
+uv run pytest -m "not network"
 
 # audit
 reqs="$(mktemp -t pypiscan-reqs.XXXXXX)"
 trap 'rm -f "$reqs"' EXIT
 uv export --no-dev --no-emit-project --output-file "$reqs" >/dev/null
-uv run pip-audit --strict --disable-pip --requirement "$reqs"
+uv run pip-audit --strict --disable-pip --no-deps --requirement "$reqs"
 uv run deptry src
