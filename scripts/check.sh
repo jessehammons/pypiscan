@@ -20,3 +20,6 @@ trap 'rm -f "$reqs"' EXIT
 uv export --no-dev --no-emit-project --output-file "$reqs" >/dev/null
 uv run pip-audit --strict --disable-pip --no-deps --requirement "$reqs"
 uv run deptry src
+
+# smoke: the CLI starts and lists its subcommands
+uv run python -m pypiscan --help >/dev/null
