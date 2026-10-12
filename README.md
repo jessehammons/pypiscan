@@ -91,13 +91,13 @@ decision before any code is written. Done items are marked ✓.
 
 ### 0. Guardrails
 
-- **0.1** Working rules in `CLAUDE.md`: never weaken a check (coverage
+- **0.1** ✓ Working rules in `CLAUDE.md`: never weaken a check (coverage
   threshold, lint rules, type strictness, CI steps) to make it pass, and
   explain the problem in the PR instead; keep non-test changes under about
   300 lines; call out any CI or tool-configuration change in the PR
-  description. **← current**
+  description.
 - **0.2** Pyright strict mode for all of `src/pypiscan` instead of a file
-  list; raise the coverage threshold to 90%.
+  list; raise the coverage threshold to 90%. **← current**
 - **0.3** pytest-socket: tests fail if they touch the network unless marked
   `network`.
 - **0.4** A pull request template: summary, manual-check output, and a
