@@ -40,12 +40,7 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "PTH", "RUF", "S", "BLE", "DTZ"]
 [tool.pyright]
 typeCheckingMode = "standard"
 reportUnnecessaryTypeIgnoreComment = "error"
-strict = [
-    "src/pypiscan/__init__.py",
-    "src/pypiscan/__main__.py",
-    "src/pypiscan/cli.py",
-    "src/pypiscan/wheel_inspect.py",
-]
+strict = ["src/pypiscan"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -66,4 +61,4 @@ source = ["pypiscan"]
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 84
+fail_under = 90

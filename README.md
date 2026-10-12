@@ -96,10 +96,10 @@ decision before any code is written. Done items are marked ✓.
   explain the problem in the PR instead; keep non-test changes under about
   300 lines; call out any CI or tool-configuration change in the PR
   description.
-- **0.2** Pyright strict mode for all of `src/pypiscan` instead of a file
-  list; raise the coverage threshold to 90%. **← current**
+- **0.2** ✓ Pyright strict mode for all of `src/pypiscan` instead of a file
+  list; raise the coverage threshold to 90%.
 - **0.3** pytest-socket: tests fail if they touch the network unless marked
-  `network`.
+  `network`. **← current**
 - **0.4** A pull request template: summary, manual-check output, and a
   checkbox for "touches CI, `check.sh` or tool configuration".
 - **0.5** *(optional; a GitHub settings change made by the maintainer, not
