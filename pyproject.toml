@@ -1,7 +1,7 @@
 [project]
 name = "pypiscan"
 version = "0.0.0"
-description = "Scans PyPI packages for known CVE issues."
+description = "Inventories compiled C libraries bundled inside PyPI wheels."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Jesse Hammons" }]
