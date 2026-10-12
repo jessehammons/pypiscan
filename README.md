@@ -101,8 +101,8 @@ decision before any code is written. Done items are marked ✓.
 - **0.3** ✓ pytest-socket blocks all network access in tests, with no
   per-test opt-out: a collection hook rejects its `enable_socket` marker and
   `socket_enabled` fixture.
-- **0.4** A pull request template: summary, manual-check output, and a
-  checkbox for "touches CI, `check.sh` or tool configuration". **← current**
+- **0.4** ✓ A pull request template: summary, manual-check output, and a
+  checkbox for "touches CI, `check.sh` or tool configuration".
 - **0.5** *(optional; a GitHub settings change made by the maintainer, not
   code, so the "current" marker skips it)* Branch protection on `main`:
   require a pull request, require all CI checks to pass, block force pushes.
@@ -117,7 +117,7 @@ version parsing.
 - **1.2** Add each binary's shared-library dependencies (`DT_NEEDED`) to
   `inspect` output, using pyelftools. Makes static linking visible: a
   library whose code appears in a binary that doesn't list it as a
-  dependency was linked in statically. Bumps `schema_version` to 2.
+  dependency was linked in statically. Bumps `schema_version` to 2. **← current**
 
 ### 2. Fingerprint
 
