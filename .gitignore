@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# pypiscan: never commit downloaded wheels or local agent settings
+*.whl
+CLAUDE.local.md
+.claude/settings.local.json
