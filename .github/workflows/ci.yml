@@ -42,7 +42,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
-      - run: uv run pytest -m "not network"
+      - run: uv run pytest
 
   audit:
     runs-on: ubuntu-latest

@@ -12,7 +12,7 @@ uv run ruff format --check
 uv run pyright
 
 # test (coverage wired via pyproject addopts)
-uv run pytest -m "not network"
+uv run pytest
 
 # audit
 reqs="$(mktemp -t pypiscan-reqs.XXXXXX)"
