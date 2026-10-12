@@ -44,6 +44,7 @@ strict = [
     "src/pypiscan/__init__.py",
     "src/pypiscan/__main__.py",
     "src/pypiscan/cli.py",
+    "src/pypiscan/wheel_inspect.py",
 ]
 
 [tool.pytest.ini_options]

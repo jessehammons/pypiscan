@@ -4,8 +4,8 @@ Inventories the compiled C libraries bundled inside PyPI wheels, identifies
 their versions from the binaries themselves, and measures how long wheels kept
 shipping library versions affected by known CVEs.
 
-Status: early development. Only the scaffold exists so far; see
-[Pipeline](#pipeline) for what is being built and in what order.
+Status: early development. `inspect` works; see [Pipeline](#pipeline) for
+what is being built and in what order.
 
 ## Why
 
@@ -35,10 +35,9 @@ pypiscan measures this layer directly from the binaries.
 
 Built in this order:
 
-1. **`inspect <wheel>`**: list the ELF binaries in a wheel, offline. Replaces
-   the `verify` stub. **← current**
+1. **`inspect <wheel>`**: list the ELF binaries in a wheel, offline.
 2. **`fingerprint`**: identify library and version from the binaries
-   (zlib first).
+   (zlib first). **← current**
 3. **`fetch <package>`**: download latest-release wheels and check them
    against the sha256 that PyPI publishes.
 4. **SBOM comparison**: what a PEP 770 SBOM claims versus what the binaries
