@@ -1,0 +1,139 @@
+tag	location	string
+v0.99	deflate.c:54	 deflate 1.0 Copyright 1995-1996 Jean-loup Gailly 
+v0.99	inftrees.c:9	 inflate 1.0 Copyright 1995-1996 Mark Adler 
+v1.0-pre	deflate.c:54	 deflate 1.0 Copyright 1995 Jean-loup Gailly 
+v1.0-pre	inftrees.c:9	 inflate 1.0 Copyright 1995 Mark Adler 
+v1.0.1	deflate.c:54	 deflate 1.0.1 Copyright 1995-1996 Jean-loup Gailly 
+v1.0.1	inftrees.c:9	 inflate 1.0.1 Copyright 1995-1996 Mark Adler 
+v1.0.2	deflate.c:54	 deflate 1.0.2 Copyright 1995-1996 Jean-loup Gailly 
+v1.0.2	inftrees.c:9	 inflate 1.0.2 Copyright 1995-1996 Mark Adler 
+v1.0.4	deflate.c:54	 deflate 1.0.4 Copyright 1995-1996 Jean-loup Gailly 
+v1.0.4	inftrees.c:9	 inflate 1.0.4 Copyright 1995-1996 Mark Adler 
+v1.0.5	deflate.c:53	 deflate 1.0.5 Copyright 1995-1998 Jean-loup Gailly 
+v1.0.5	inftrees.c:9	 inflate 1.0.5 Copyright 1995-1998 Mark Adler 
+v1.0.7	deflate.c:55	 deflate 1.0.7 Copyright 1995-1998 Jean-loup Gailly 
+v1.0.7	inftrees.c:10	 inflate 1.0.7 Copyright 1995-1998 Mark Adler 
+v1.0.8	deflate.c:55	 deflate 1.0.8 Copyright 1995-1998 Jean-loup Gailly 
+v1.0.8	inftrees.c:10	 inflate 1.0.8 Copyright 1995-1998 Mark Adler 
+v1.0.9	deflate.c:55	 deflate 1.0.9 Copyright 1995-1998 Jean-loup Gailly 
+v1.0.9	inftrees.c:10	 inflate 1.0.9 Copyright 1995-1998 Mark Adler 
+v1.1.0	deflate.c:55	 deflate 1.1.0 Copyright 1995-1998 Jean-loup Gailly 
+v1.1.0	inftrees.c:10	 inflate 1.1.0 Copyright 1995-1998 Mark Adler 
+v1.1.1	deflate.c:55	 deflate 1.1.1 Copyright 1995-1998 Jean-loup Gailly 
+v1.1.1	inftrees.c:10	 inflate 1.1.1 Copyright 1995-1998 Mark Adler 
+v1.1.2	deflate.c:55	 deflate 1.1.2 Copyright 1995-1998 Jean-loup Gailly 
+v1.1.2	inftrees.c:14	 inflate 1.1.2 Copyright 1995-1998 Mark Adler 
+v1.1.3	deflate.c:55	 deflate 1.1.3 Copyright 1995-1998 Jean-loup Gailly 
+v1.1.3	inftrees.c:14	 inflate 1.1.3 Copyright 1995-1998 Mark Adler 
+v1.1.4	deflate.c:55	 deflate 1.1.4 Copyright 1995-2002 Jean-loup Gailly 
+v1.1.4	inftrees.c:14	 inflate 1.1.4 Copyright 1995-2002 Mark Adler 
+v1.2.0	deflate.c:55	 deflate 1.2.0 Copyright 1995-2003 Jean-loup Gailly 
+v1.2.0	inftrees.c:12	 inflate 1.2.0 Copyright 1995-2003 Mark Adler 
+v1.2.0.1	deflate.c:55	 deflate 1.2.0.1 Copyright 1995-2003 Jean-loup Gailly 
+v1.2.0.1	inftrees.c:12	 inflate 1.2.0.1 Copyright 1995-2003 Mark Adler 
+v1.2.0.2	deflate.c:55	 deflate 1.2.0.2 Copyright 1995-2003 Jean-loup Gailly 
+v1.2.0.2	inftrees.c:12	 inflate 1.2.0.2 Copyright 1995-2003 Mark Adler 
+v1.2.0.3	deflate.c:55	 deflate 1.2.0.3 Copyright 1995-2003 Jean-loup Gailly 
+v1.2.0.3	inftrees.c:12	 inflate 1.2.0.3 Copyright 1995-2003 Mark Adler 
+v1.2.0.4	deflate.c:55	 deflate 1.2.0.4 Copyright 1995-2003 Jean-loup Gailly 
+v1.2.0.4	inftrees.c:12	 inflate 1.2.0.4 Copyright 1995-2003 Mark Adler 
+v1.2.0.5	deflate.c:55	 deflate 1.2.0.5 Copyright 1995-2003 Jean-loup Gailly 
+v1.2.0.5	inftrees.c:12	 inflate 1.2.0.5 Copyright 1995-2003 Mark Adler 
+v1.2.0.6	deflate.c:55	 deflate 1.2.0.6 Copyright 1995-2003 Jean-loup Gailly 
+v1.2.0.6	inftrees.c:12	 inflate 1.2.0.6 Copyright 1995-2003 Mark Adler 
+v1.2.0.7	deflate.c:55	 deflate 1.2.0.7 Copyright 1995-2003 Jean-loup Gailly 
+v1.2.0.7	inftrees.c:12	 inflate 1.2.0.7 Copyright 1995-2003 Mark Adler 
+v1.2.0.8	deflate.c:55	 deflate 1.2.0.8 Copyright 1995-2003 Jean-loup Gailly 
+v1.2.0.8	inftrees.c:12	 inflate 1.2.0.8 Copyright 1995-2003 Mark Adler 
+v1.2.1	deflate.c:55	 deflate 1.2.1 Copyright 1995-2003 Jean-loup Gailly 
+v1.2.1	inftrees.c:12	 inflate 1.2.1 Copyright 1995-2003 Mark Adler 
+v1.2.1.1	deflate.c:55	 deflate 1.2.1.1 Copyright 1995-2003 Jean-loup Gailly 
+v1.2.1.1	inftrees.c:12	 inflate 1.2.1.1 Copyright 1995-2004 Mark Adler 
+v1.2.1.2	deflate.c:55	 deflate 1.2.1.2 Copyright 1995-2004 Jean-loup Gailly 
+v1.2.1.2	inftrees.c:12	 inflate 1.2.1.2 Copyright 1995-2004 Mark Adler 
+v1.2.2	deflate.c:55	 deflate 1.2.2 Copyright 1995-2004 Jean-loup Gailly 
+v1.2.2	inftrees.c:12	 inflate 1.2.2 Copyright 1995-2004 Mark Adler 
+v1.2.2.1	deflate.c:55	 deflate 1.2.2.1 Copyright 1995-2004 Jean-loup Gailly 
+v1.2.2.1	inftrees.c:12	 inflate 1.2.2.1 Copyright 1995-2004 Mark Adler 
+v1.2.2.2	deflate.c:55	 deflate 1.2.2.2 Copyright 1995-2004 Jean-loup Gailly 
+v1.2.2.2	inftrees.c:12	 inflate 1.2.2.2 Copyright 1995-2004 Mark Adler 
+v1.2.2.3	deflate.c:55	 deflate 1.2.2.3 Copyright 1995-2005 Jean-loup Gailly 
+v1.2.2.3	inftrees.c:12	 inflate 1.2.2.3 Copyright 1995-2005 Mark Adler 
+v1.2.2.4	deflate.c:55	 deflate 1.2.2.4 Copyright 1995-2005 Jean-loup Gailly 
+v1.2.2.4	inftrees.c:12	 inflate 1.2.2.4 Copyright 1995-2005 Mark Adler 
+v1.2.3	deflate.c:55	 deflate 1.2.3 Copyright 1995-2005 Jean-loup Gailly 
+v1.2.3	inftrees.c:12	 inflate 1.2.3 Copyright 1995-2005 Mark Adler 
+v1.2.3.1	deflate.c:55	 deflate 1.2.3.1 Copyright 1995-2005 Jean-loup Gailly 
+v1.2.3.1	inftrees.c:12	 inflate 1.2.3.1 Copyright 1995-2005 Mark Adler 
+v1.2.3.2	deflate.c:55	 deflate 1.2.3.2 Copyright 1995-2006 Jean-loup Gailly 
+v1.2.3.2	inftrees.c:12	 inflate 1.2.3.2 Copyright 1995-2006 Mark Adler 
+v1.2.3.3	deflate.c:55	 deflate 1.2.3.3 Copyright 1995-2006 Jean-loup Gailly 
+v1.2.3.3	inftrees.c:12	 inflate 1.2.3.3 Copyright 1995-2006 Mark Adler 
+v1.2.3.4	deflate.c:55	 deflate 1.2.3.4 Copyright 1995-2009 Jean-loup Gailly 
+v1.2.3.4	inftrees.c:12	 inflate 1.2.3.4 Copyright 1995-2008 Mark Adler 
+v1.2.3.5	deflate.c:55	 deflate 1.2.3.5 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.3.5	inftrees.c:12	 inflate 1.2.3.5 Copyright 1995-2010 Mark Adler 
+v1.2.3.6	deflate.c:55	 deflate 1.2.3.6 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.3.6	inftrees.c:12	 inflate 1.2.3.6 Copyright 1995-2010 Mark Adler 
+v1.2.3.7	deflate.c:55	 deflate 1.2.3.7 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.3.7	inftrees.c:12	 inflate 1.2.3.7 Copyright 1995-2010 Mark Adler 
+v1.2.3.8	deflate.c:55	 deflate 1.2.3.8 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.3.8	inftrees.c:12	 inflate 1.2.3.8 Copyright 1995-2010 Mark Adler 
+v1.2.3.9	deflate.c:55	 deflate 1.2.3.9 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.3.9	inftrees.c:12	 inflate 1.2.3.9 Copyright 1995-2010 Mark Adler 
+v1.2.4-pre1	deflate.c:55	 deflate 1.2.4 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.4-pre1	inftrees.c:12	 inflate 1.2.4 Copyright 1995-2010 Mark Adler 
+v1.2.4-pre2	deflate.c:55	 deflate 1.2.4 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.4-pre2	inftrees.c:12	 inflate 1.2.4 Copyright 1995-2010 Mark Adler 
+v1.2.4	deflate.c:55	 deflate 1.2.4 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.4	inftrees.c:12	 inflate 1.2.4 Copyright 1995-2010 Mark Adler 
+v1.2.4.1	deflate.c:55	 deflate 1.2.4.1 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.4.1	inftrees.c:12	 inflate 1.2.4.1 Copyright 1995-2010 Mark Adler 
+v1.2.4.2	deflate.c:55	 deflate 1.2.4.2 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.4.2	inftrees.c:12	 inflate 1.2.4.2 Copyright 1995-2010 Mark Adler 
+v1.2.4.3	deflate.c:55	 deflate 1.2.4.3 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.4.3	inftrees.c:12	 inflate 1.2.4.3 Copyright 1995-2010 Mark Adler 
+v1.2.4.4	deflate.c:55	 deflate 1.2.4.4 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.4.4	inftrees.c:12	 inflate 1.2.4.4 Copyright 1995-2010 Mark Adler 
+v1.2.4.5	deflate.c:55	 deflate 1.2.4.5 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.4.5	inftrees.c:12	 inflate 1.2.4.5 Copyright 1995-2010 Mark Adler 
+v1.2.5	deflate.c:55	 deflate 1.2.5 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.5	inftrees.c:12	 inflate 1.2.5 Copyright 1995-2010 Mark Adler 
+v1.2.5.1	deflate.c:55	 deflate 1.2.5.1 Copyright 1995-2010 Jean-loup Gailly and Mark Adler 
+v1.2.5.1	inftrees.c:12	 inflate 1.2.5.1 Copyright 1995-2010 Mark Adler 
+v1.2.5.2	deflate.c:55	 deflate 1.2.5.2 Copyright 1995-2011 Jean-loup Gailly and Mark Adler 
+v1.2.5.2	inftrees.c:12	 inflate 1.2.5.2 Copyright 1995-2011 Mark Adler 
+v1.2.5.3	deflate.c:55	 deflate 1.2.5.3 Copyright 1995-2012 Jean-loup Gailly and Mark Adler 
+v1.2.5.3	inftrees.c:12	 inflate 1.2.5.3 Copyright 1995-2011 Mark Adler 
+v1.2.6	deflate.c:55	 deflate 1.2.6 Copyright 1995-2012 Jean-loup Gailly and Mark Adler 
+v1.2.6	inftrees.c:12	 inflate 1.2.6 Copyright 1995-2012 Mark Adler 
+v1.2.6.1	deflate.c:55	 deflate 1.2.6.1 Copyright 1995-2012 Jean-loup Gailly and Mark Adler 
+v1.2.6.1	inftrees.c:12	 inflate 1.2.6.1 Copyright 1995-2012 Mark Adler 
+v1.2.7	deflate.c:55	 deflate 1.2.7 Copyright 1995-2012 Jean-loup Gailly and Mark Adler 
+v1.2.7	inftrees.c:12	 inflate 1.2.7 Copyright 1995-2012 Mark Adler 
+v1.2.7.1	deflate.c:55	 deflate 1.2.7.1 Copyright 1995-2013 Jean-loup Gailly and Mark Adler 
+v1.2.7.1	inftrees.c:12	 inflate 1.2.7.1 Copyright 1995-2013 Mark Adler 
+v1.2.7.2	deflate.c:55	 deflate 1.2.7.2 Copyright 1995-2013 Jean-loup Gailly and Mark Adler 
+v1.2.7.2	inftrees.c:12	 inflate 1.2.7.2 Copyright 1995-2013 Mark Adler 
+v1.2.7.3	deflate.c:55	 deflate 1.2.7.3 Copyright 1995-2013 Jean-loup Gailly and Mark Adler 
+v1.2.7.3	inftrees.c:12	 inflate 1.2.7.3 Copyright 1995-2013 Mark Adler 
+v1.2.8	deflate.c:55	 deflate 1.2.8 Copyright 1995-2013 Jean-loup Gailly and Mark Adler 
+v1.2.8	inftrees.c:12	 inflate 1.2.8 Copyright 1995-2013 Mark Adler 
+v1.2.9	deflate.c:55	 deflate 1.2.9 Copyright 1995-2016 Jean-loup Gailly and Mark Adler 
+v1.2.9	inftrees.c:12	 inflate 1.2.9 Copyright 1995-2016 Mark Adler 
+v1.2.10	deflate.c:55	 deflate 1.2.10 Copyright 1995-2017 Jean-loup Gailly and Mark Adler 
+v1.2.10	inftrees.c:12	 inflate 1.2.10 Copyright 1995-2017 Mark Adler 
+v1.2.11	deflate.c:55	 deflate 1.2.11 Copyright 1995-2017 Jean-loup Gailly and Mark Adler 
+v1.2.11	inftrees.c:12	 inflate 1.2.11 Copyright 1995-2017 Mark Adler 
+v1.2.12	deflate.c:55	 deflate 1.2.12 Copyright 1995-2022 Jean-loup Gailly and Mark Adler 
+v1.2.12	inftrees.c:12	 inflate 1.2.12 Copyright 1995-2022 Mark Adler 
+v1.2.13	deflate.c:55	 deflate 1.2.13 Copyright 1995-2022 Jean-loup Gailly and Mark Adler 
+v1.2.13	inftrees.c:12	 inflate 1.2.13 Copyright 1995-2022 Mark Adler 
+v1.3	deflate.c:55	 deflate 1.3 Copyright 1995-2023 Jean-loup Gailly and Mark Adler 
+v1.3	inftrees.c:12	 inflate 1.3 Copyright 1995-2023 Mark Adler 
+v1.3.1	deflate.c:55	 deflate 1.3.1 Copyright 1995-2024 Jean-loup Gailly and Mark Adler 
+v1.3.1	inftrees.c:12	 inflate 1.3.1 Copyright 1995-2024 Mark Adler 
+v1.3.1.2	deflate.c:55	 deflate 1.3.1.2 Copyright 1995-2025 Jean-loup Gailly and Mark Adler 
+v1.3.1.2	inftrees.c:12	 inflate 1.3.1.2 Copyright 1995-2025 Mark Adler 
+v1.3.2	deflate.c:55	 deflate 1.3.2 Copyright 1995-2026 Jean-loup Gailly and Mark Adler 
+v1.3.2	inftrees.c:26	 inflate 1.3.2 Copyright 1995-2026 Mark Adler 

@@ -27,6 +27,7 @@ dev = [
     "pip-audit",
     "deptry",
     "pytest-socket>=0.8.1",
+    "dulwich>=1.2.17",
 ]
 
 [tool.ruff]

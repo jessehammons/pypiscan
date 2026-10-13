@@ -289,10 +289,11 @@ version parsing.
     2.3.3 from upstream source in a temporary directory, in both compat and
     native modes, pack each shared library into a throwaway wheel, and
     confirm both report zlib-ng 2.3.3, never classic zlib.
-- **2.2** Upstream string fixtures. A script reads a library's upstream git
+- **2.2** ✓ Upstream string fixtures. A script reads a library's upstream git
   repository and, at every release tag, extracts each string the detector's
-  patterns cite. It reads the C literal directly, and runs the preprocessor
-  only when a string is assembled from macros. It writes
+  patterns cite. It reads the C literal directly; no zlib or zlib-ng string
+  is assembled from macros, so one that is stops the script with an error
+  until a preprocessor step is added. It writes
   `tests/upstream/<library>.tsv` with one row per tag and string: tag, file
   and line, and the string. The fixtures are text and are committed;
   generating them needs the network, so the script runs outside pytest.
@@ -300,7 +301,7 @@ version parsing.
   detector reports that tag's library and version, allowing for spelling
   differences between tag names and strings (`2.1.0-beta1` versus
   `2.1.0.beta1`). A tag the detector misclassifies or misses fails the
-  tests. Covers zlib and zlib-ng at every release tag. **← current**
+  tests. Covers zlib and zlib-ng at every release tag.
 - **2.3** `pypiscan strings <wheel>` lists, for each ELF binary, every
   printable string that contains a version-like token (digit runs separated
   by dots), with its offset and a template in which each digit run becomes
@@ -308,7 +309,7 @@ version parsing.
   `deflate #.#.# Copyright #-# …`. Offline, like `inspect`. Grouping
   templates across many wheels is `scan`'s report phase (3.5). Manual check:
   for lxml 6.1.3, `lxml/etree` lists zlib's `deflate` banner with that
-  template.
+  template. **← current**
 
 ### 3. Breadth-first scan
 
@@ -456,6 +457,10 @@ Run as `python -m pypiscan <subcommand>`.
 - `uv run pytest`: run the tests (coverage is wired in via `pyproject.toml`).
 - `scripts/check.sh`: runs exactly what CI runs. If it passes locally, CI
   should pass.
+- `uv run python scripts/upstream_fixtures.py <library>`: clone the
+  library's upstream repository into a temporary directory and regenerate
+  `tests/upstream/<library>.tsv` from the detectors' citations. Needs the
+  network.
 
 After `uv tool install pre-commit`, run `pre-commit install` once per clone to
 enable the git hooks. `~/.local/bin` must be on your `PATH` so `uv` and
