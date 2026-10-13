@@ -83,6 +83,64 @@ are not sent as security reports.
   CVEs and fix commits, and as cross-checks. Their version ranges for C
   libraries are often wrong and are never used unverified.
 
+## How versions are identified
+
+A version number found in a binary means different things depending on where
+the string comes from. Detectors record every match as one of three kinds of
+evidence:
+
+- **Library string**: a string defined in one of the upstream library's own
+  source files, such as zlib's `deflate` and `inflate` copyright banners.
+  Only this kind shows that a binary contains the library, and only this
+  kind sets its version.
+- **Header string**: a version macro from the library's public header, such
+  as `ZLIB_VERSION`. Code that *calls* a library embeds it; for example,
+  zlib's `deflateInit()` passes `ZLIB_VERSION` to the library. It shows
+  which headers a binary was compiled against, never that the binary
+  contains the library.
+- **Filename**: the version suffix on a wheel member's name, such as
+  `libz-….so.1.3.1`. It isn't part of the binary's contents, and for some
+  libraries (libtiff, libwebp) it's an ABI number rather than a release. It
+  is recorded as corroboration only: it never sets a version and never
+  produces a record on its own.
+
+Exported symbols and `DT_SONAME` are not version evidence.
+
+Rules for detectors:
+
+- Patterns match whole strings, such as a full banner, and capture the
+  version from inside them. A pattern for a bare version number also matches
+  header strings and unrelated data.
+- Each pattern cites the upstream source file that defines its string, at a
+  release tag. Patterns come from reading upstream source, not from memory.
+- Versions are kept exactly as the string gives them, including four-part
+  versions such as zlib 1.3.1.1.
+- Some libraries have derivatives that carry their strings (zlib-ng for
+  zlib; BoringSSL, LibreSSL and AWS-LC for OpenSSL). A binary is reported as
+  the original only if it has the original's library strings and none of a
+  derivative's. A derivative is reported with its own version, not the
+  version it claims compatibility with. If upstream source offers no library
+  string that tells them apart, stop and ask the maintainer.
+
+`fingerprint` writes JSON Lines with its own `schema_version`, one record
+per binary, library and relation:
+
+- `wheel`, `path`, `sha256`: as in `inspect`.
+- `library`: such as `zlib` or `zlib-ng`.
+- `relation`: `contains` when library strings matched; `compiled_against`
+  when only header strings did.
+- `version`: from library strings for `contains`; the header string
+  verbatim for `compiled_against`; `null` when library strings in one binary
+  disagree.
+- `conflict`: `true` when library strings in one binary give different
+  versions.
+- `evidence`: every match, with its kind, the matched text, its file offset
+  and its ELF section name (offset and section are `null` for filename
+  evidence, and the section is `null` when it can't be mapped).
+
+A binary with no matches produces no record. No record means "not detected",
+not "not present".
+
 ## Roadmap
 
 Each item is one pull request, sized to be implemented in about 20–30 agent
@@ -121,10 +179,23 @@ version parsing.
 
 ### 2. Fingerprint
 
-- **2.1** Detector framework plus the zlib family: `fingerprint <wheel>`
-  reports library, version and the evidence that matched, and tells classic
-  zlib apart from zlib-ng (their CVE histories differ). Manual check: Pillow
-  12.3.0 should show zlib-ng 2.3.3. **← current**
+- **2.1** Detector framework plus the zlib family, following
+  [How versions are identified](#how-versions-are-identified):
+  `fingerprint <wheel>` reports library, version and the evidence that
+  matched, and tells classic zlib apart from zlib-ng (their CVE histories
+  differ). Adding a library later means adding one detector, not changing
+  the scanner or the output format. **← current** Manual checks:
+  - lxml 6.1.3: zlib 1.3.2, `contains`, in both `lxml/etree` and
+    `lxml/objectify` (one record each).
+  - grpcio 1.84.0: zlib 1.3.1.1, `contains`, in `grpc/_cython/cygrpc`.
+  - Pillow 12.3.0 ships no zlib code. Its build scripts pin zlib-ng 2.3.3,
+    but its binaries load the system's `libz.so.1`. It should show no
+    `contains` for zlib or zlib-ng, only `compiled_against` zlib-ng
+    `1.3.1.zlib-ng` in `_imaging`, `libfreetype`, `libpng16` and `libtiff`.
+  - zlib-ng: no wheel examined so far carries zlib-ng code. Build zlib-ng
+    2.3.3 from upstream source in a temporary directory, in both compat and
+    native modes, pack each shared library into a throwaway wheel, and
+    confirm both report zlib-ng 2.3.3, never classic zlib.
 - **2.2** libpng, libjpeg-turbo and libtiff detectors.
 - **2.3** OpenSSL (told apart from BoringSSL, LibreSSL and AWS-LC), expat and
   sqlite detectors.
@@ -132,8 +203,10 @@ version parsing.
   choose a detection method before implementing it.
 - **2.5** Report binaries no detector recognized, so gaps are visible.
 
-Manual checks for 2.1–2.4 compare results against Pillow 12.3.0's
-`.github/dependencies.json`.
+Manual checks for 2.2 and 2.4 compare results against Pillow 12.3.0's
+`.github/dependencies.json`. Pillow bundles no OpenSSL, expat or sqlite, so
+2.3 needs other wheels, found the same way as 2.1's: by searching wheels'
+bytes for each library's own strings.
 
 ### 3. Fetch and scan
 
