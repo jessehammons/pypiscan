@@ -114,17 +114,17 @@ version parsing.
 ### 1. Inspect
 
 - **1.1** ✓ `inspect <wheel>`: list the ELF binaries in a wheel, offline.
-- **1.2** Add each binary's shared-library dependencies (`DT_NEEDED`) to
+- **1.2** ✓ Add each binary's shared-library dependencies (`DT_NEEDED`) to
   `inspect` output, using pyelftools. Makes static linking visible: a
   library whose code appears in a binary that doesn't list it as a
-  dependency was linked in statically. Bumps `schema_version` to 2. **← current**
+  dependency was linked in statically. Bumps `schema_version` to 2.
 
 ### 2. Fingerprint
 
 - **2.1** Detector framework plus the zlib family: `fingerprint <wheel>`
   reports library, version and the evidence that matched, and tells classic
   zlib apart from zlib-ng (their CVE histories differ). Manual check: Pillow
-  12.3.0 should show zlib-ng 2.3.3.
+  12.3.0 should show zlib-ng 2.3.3. **← current**
 - **2.2** libpng, libjpeg-turbo and libtiff detectors.
 - **2.3** OpenSSL (told apart from BoringSSL, LibreSSL and AWS-LC), expat and
   sqlite detectors.

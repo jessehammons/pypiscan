@@ -1,13 +1,17 @@
 """List the ELF binaries inside a wheel without extracting it."""
 
 import hashlib
+import io
 import zipfile
 from pathlib import Path
 from typing import TypedDict
 
-SCHEMA_VERSION = 1
+from elftools.common.exceptions import ELFError
+from elftools.elf.dynamic import DynamicSegment
+from elftools.elf.elffile import ELFFile
+
+SCHEMA_VERSION = 2
 ELF_MAGIC = b"\x7fELF"
-_CHUNK_SIZE = 1 << 20
 
 
 class WheelError(Exception):
@@ -21,6 +25,29 @@ class ElfRecord(TypedDict):
     size: int
     sha256: str
     in_libs_dir: bool
+    needed: list[str] | None
+
+
+def _needed(data: bytes) -> list[str] | None:
+    """Return the ``DT_NEEDED`` entries of an ELF image, in file order.
+
+    Reads the loader's view (the ``PT_DYNAMIC`` segment), so binaries with
+    stripped section headers still resolve. A binary with no dynamic segment
+    is statically linked and returns ``[]``. Returns ``None`` if the image
+    can't be parsed.
+    """
+    try:
+        elf = ELFFile(io.BytesIO(data))
+        # DynamicTag sets ``needed`` with setattr, so it isn't a typed attribute.
+        return [
+            str(vars(tag)["needed"])
+            for segment in elf.iter_segments()
+            if isinstance(segment, DynamicSegment)
+            for tag in segment.iter_tags("DT_NEEDED")
+        ]
+    # pyelftools signals some malformed input with assertions, not ELFError.
+    except (ELFError, AssertionError):
+        return None
 
 
 def _in_libs_dir(member: str) -> bool:
@@ -31,8 +58,8 @@ def _in_libs_dir(member: str) -> bool:
 def inspect_wheel(wheel: Path) -> list[ElfRecord]:
     """Return one record per ELF member of ``wheel``, in archive order.
 
-    Members are streamed from the archive and hashed in memory; nothing is
-    written to disk and no member is executed.
+    Each ELF member is read into memory, hashed and parsed as data; nothing
+    is written to disk and no member is executed.
     """
     if not wheel.is_file():
         raise WheelError(f"{wheel}: no such file")
@@ -54,19 +81,15 @@ def _inspect_member(
     zf: zipfile.ZipFile, info: zipfile.ZipInfo, wheel_name: str
 ) -> ElfRecord | None:
     with zf.open(info) as f:
-        head = f.read(len(ELF_MAGIC))
-        if head != ELF_MAGIC:
+        if f.read(len(ELF_MAGIC)) != ELF_MAGIC:
             return None
-        digest = hashlib.sha256(head)
-        size = len(head)
-        while chunk := f.read(_CHUNK_SIZE):
-            digest.update(chunk)
-            size += len(chunk)
+        data = ELF_MAGIC + f.read()
     return {
         "schema_version": SCHEMA_VERSION,
         "wheel": wheel_name,
         "path": info.filename,
-        "size": size,
-        "sha256": digest.hexdigest(),
+        "size": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
         "in_libs_dir": _in_libs_dir(info.filename),
+        "needed": _needed(data),
     }
