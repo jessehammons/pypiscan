@@ -45,8 +45,11 @@ def _needed(data: bytes) -> list[str] | None:
             if isinstance(segment, DynamicSegment)
             for tag in segment.iter_tags("DT_NEEDED")
         ]
-    # pyelftools signals some malformed input with assertions, not ELFError.
-    except (ELFError, AssertionError):
+    # Besides ELFError, pyelftools lets other errors through on malformed input:
+    # AssertionError when the dynamic string table can't be located,
+    # UnicodeDecodeError (a ValueError) when a stripped binary's DT_NEEDED name
+    # isn't UTF-8, and OverflowError when seeking to a name offset near 2**64.
+    except (ELFError, AssertionError, ValueError, OverflowError):
         return None
 
 

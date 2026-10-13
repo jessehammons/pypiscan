@@ -105,6 +105,14 @@ def build_elf(
 LIBS_ELF = build_elf(["libc.so.6"], trailer=b"libz payload")
 EXT_ELF = build_elf(["libz-abc123.so.1.3.1", "libc.so.6"])
 
+# Stripped images whose DT_NEEDED entry is corrupt after the fact: a name that
+# isn't UTF-8, and a name offset near 2**64.
+_STRIPPED = build_elf(["libz.so.1"], section_headers=False)
+NON_UTF8_NAME_ELF = _STRIPPED.replace(b"libz.so.1", b"libz\xff.so1")
+HUGE_NAME_OFFSET_ELF = _STRIPPED.replace(
+    _DYN.pack(_DT_NEEDED, 1), _DYN.pack(_DT_NEEDED, 0xFFFFFFFFFFFFFFF0)
+)
+
 
 def build_wheel(path: Path, members: dict[str, bytes]) -> Path:
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -180,6 +188,8 @@ def test_schema_version_is_2() -> None:
             None,
             id="unresolvable-strtab",
         ),
+        pytest.param(NON_UTF8_NAME_ELF, None, id="non-utf8-name"),
+        pytest.param(HUGE_NAME_OFFSET_ELF, None, id="huge-name-offset"),
         pytest.param(b"\x7fELF" + b"\xff" * 100, None, id="malformed"),
         pytest.param(b"\x7fELF", None, id="magic-only"),
     ],
