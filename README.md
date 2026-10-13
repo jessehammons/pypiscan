@@ -111,8 +111,17 @@ Rules for detectors:
 - Patterns match whole strings, such as a full banner, and capture the
   version from inside them. A pattern for a bare version number also matches
   header strings and unrelated data.
+- Candidate patterns come from discovery across real wheels (roadmap 2.3):
+  version-like strings grouped by the text around them. Upstream source then
+  confirms each candidate: which file defines it, and whether it is a
+  library string or a header string.
 - Each pattern cites the upstream source file that defines its string, at a
   release tag. Patterns come from reading upstream source, not from memory.
+- Each pattern is tested against its string at *every* upstream release tag,
+  from a committed fixture generated from the upstream repository (roadmap
+  2.2). Reading one release isn't enough: before 2.1.0, zlib-ng named and
+  worded its identity string differently, and a pattern written from 2.3.3
+  alone missed it.
 - Versions are kept exactly as the string gives them, including four-part
   versions such as zlib 1.3.1.1.
 - Some libraries have derivatives that carry their strings (zlib-ng for
@@ -196,17 +205,45 @@ version parsing.
     2.3.3 from upstream source in a temporary directory, in both compat and
     native modes, pack each shared library into a throwaway wheel, and
     confirm both report zlib-ng 2.3.3, never classic zlib.
-- **2.2** libpng, libjpeg-turbo and libtiff detectors. **← current**
-- **2.3** OpenSSL (told apart from BoringSSL, LibreSSL and AWS-LC), expat and
+- **2.2** Upstream string fixtures. A script reads a library's upstream git
+  repository and, at every release tag, extracts each string the detector's
+  patterns cite. It reads the C literal directly, and runs the preprocessor
+  only when a string is assembled from macros. It writes
+  `tests/upstream/<library>.tsv` with one row per tag and string: tag, file
+  and line, and the string. The fixtures are text and are committed;
+  generating them needs the network, so the script runs outside pytest.
+  Tests place each tag's strings in a synthetic binary and check that the
+  detector reports that tag's library and version, allowing for spelling
+  differences between tag names and strings (`2.1.0-beta1` versus
+  `2.1.0.beta1`). A tag the detector misclassifies or misses fails the
+  tests. Covers zlib and zlib-ng at every release tag. **← current**
+- **2.3** Discovery. `pypiscan strings <wheel>` lists, for each ELF binary,
+  every printable string that contains a version-like token (digit runs
+  separated by dots), with its offset and a template in which each digit
+  run becomes `#`: `deflate 1.3.2 Copyright 1995-2026 …` becomes
+  `deflate #.#.# Copyright #-# …`. A script runs it over a corpus of wheels
+  downloaded outside the repository and writes a table of templates: how
+  many wheels and binaries each appears in, example strings, and which
+  detector pattern explains it, if any. The corpus is the most-downloaded
+  packages that publish manylinux x86_64 wheels for CPython 3.12, up to
+  about 100, taken from the public top-pypi-packages list, until 3.2's
+  committed package list replaces it. The table stays outside the
+  repository; the PR includes the most frequent templates, explained and
+  unexplained. Unexplained templates that recur across wheels are
+  candidates for new detectors, or for variants existing ones miss.
+- **2.4** libpng, libjpeg-turbo and libtiff detectors.
+- **2.5** OpenSSL (told apart from BoringSSL, LibreSSL and AWS-LC), expat and
   sqlite detectors.
-- **2.4** *(maintainer input)* libwebp: it embeds no plain version string, so
+- **2.6** *(maintainer input)* libwebp: it embeds no plain version string, so
   choose a detection method before implementing it.
-- **2.5** Report binaries no detector recognized, so gaps are visible.
+- **2.7** Report binaries no detector recognized, so gaps are visible.
 
-Manual checks for 2.2 and 2.4 compare results against Pillow 12.3.0's
+Each detector item (2.4 onward) starts from 2.3's discovery table and ships
+with 2.2-style fixtures covering every upstream release tag.
+
+Manual checks for 2.4 and 2.6 compare results against Pillow 12.3.0's
 `.github/dependencies.json`. Pillow bundles no OpenSSL, expat or sqlite, so
-2.3 needs other wheels, found the same way as 2.1's: by searching wheels'
-bytes for each library's own strings.
+2.5 needs other wheels, found with 2.3's discovery.
 
 ### 3. Fetch and scan
 
