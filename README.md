@@ -363,13 +363,13 @@ enable the git hooks. `~/.local/bin` must be on your `PATH` so `uv` and
   branches, rebased or force-pushed. Work that has to wait goes on its own
   branch from `main` and becomes a pull request when it's next.
 - Pull requests are squash-merged, and the branch is deleted afterwards.
-- Branch names have one of four prefixes, followed by a slug of two to four
-  lowercase words joined by hyphens:
-  - `roadmap/<item>-<slug>` for a roadmap item, such as
-    `roadmap/2.2-upstream-fixtures`.
-  - `docs/<slug>` for documentation changes outside the roadmap.
-  - `fix/<slug>` for fixes outside the roadmap.
-  - `chore/<slug>` for tooling, CI and dependency changes.
+- Branch names are lowercase words joined by hyphens, with no `/`: one of
+  four prefixes, then a slug of two to four words.
+  - `roadmap-<item>-<slug>` for a roadmap item, such as
+    `roadmap-2.2-upstream-fixtures`.
+  - `docs-<slug>` for documentation changes outside the roadmap.
+  - `fix-<slug>` for fixes outside the roadmap.
+  - `chore-<slug>` for tooling, CI and dependency changes.
 - No dates, random suffixes or tool names in branch names. A session that
   starts on an automatically named branch (such as `claude/…`) creates a
   correctly named branch from `main` before its first commit.
