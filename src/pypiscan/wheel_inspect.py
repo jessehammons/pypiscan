@@ -3,6 +3,7 @@
 import hashlib
 import io
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TypedDict
 
@@ -58,41 +59,41 @@ def _in_libs_dir(member: str) -> bool:
     return bool(sep) and top.endswith(".libs")
 
 
-def inspect_wheel(wheel: Path) -> list[ElfRecord]:
-    """Return one record per ELF member of ``wheel``, in archive order.
+def iter_elf_members(wheel: Path) -> Iterator[tuple[str, bytes]]:
+    """Yield ``(member path, contents)`` for each ELF member, in archive order.
 
-    Each ELF member is read into memory, hashed and parsed as data; nothing
-    is written to disk and no member is executed.
+    Each ELF member is read into memory as data; nothing is written to disk
+    and no member is executed. Raises ``WheelError`` if ``wheel`` can't be read.
     """
     if not wheel.is_file():
         raise WheelError(f"{wheel}: no such file")
     try:
         with zipfile.ZipFile(wheel) as zf:
-            return [
-                record
-                for info in zf.infolist()
-                if not info.is_dir()
-                and (record := _inspect_member(zf, info, wheel.name)) is not None
-            ]
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                with zf.open(info) as f:
+                    if f.read(len(ELF_MAGIC)) != ELF_MAGIC:
+                        continue
+                    data = ELF_MAGIC + f.read()
+                yield info.filename, data
     except zipfile.BadZipFile as exc:
         raise WheelError(f"{wheel}: not a valid zip file ({exc})") from exc
     except OSError as exc:
         raise WheelError(f"{wheel}: {exc}") from exc
 
 
-def _inspect_member(
-    zf: zipfile.ZipFile, info: zipfile.ZipInfo, wheel_name: str
-) -> ElfRecord | None:
-    with zf.open(info) as f:
-        if f.read(len(ELF_MAGIC)) != ELF_MAGIC:
-            return None
-        data = ELF_MAGIC + f.read()
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "wheel": wheel_name,
-        "path": info.filename,
-        "size": len(data),
-        "sha256": hashlib.sha256(data).hexdigest(),
-        "in_libs_dir": _in_libs_dir(info.filename),
-        "needed": _needed(data),
-    }
+def inspect_wheel(wheel: Path) -> list[ElfRecord]:
+    """Return one record per ELF member of ``wheel``, in archive order."""
+    return [
+        {
+            "schema_version": SCHEMA_VERSION,
+            "wheel": wheel.name,
+            "path": path,
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "in_libs_dir": _in_libs_dir(path),
+            "needed": _needed(data),
+        }
+        for path, data in iter_elf_members(wheel)
+    ]

@@ -1,106 +1,17 @@
 import hashlib
 import json
-import struct
 import zipfile
 from pathlib import Path
 
 import pytest
 
+from elf_builder import DT_NEEDED, DYN, build_elf
 from pypiscan.cli import main
 from pypiscan.wheel_inspect import (
     SCHEMA_VERSION,
     WheelError,
     inspect_wheel,
 )
-
-# ELF64 little-endian layouts: file header, program header, section header,
-# dynamic entry.
-_EHDR = struct.Struct("<16sHHIQQQIHHHHHH")
-_PHDR = struct.Struct("<IIQQQQQQ")
-_SHDR = struct.Struct("<IIQQQQIIQQ")
-_DYN = struct.Struct("<qQ")
-_PT_LOAD, _PT_DYNAMIC = 1, 2
-_SHT_STRTAB, _SHT_DYNAMIC = 3, 6
-_DT_NULL, _DT_NEEDED, _DT_STRTAB, _DT_STRSZ = 0, 1, 5, 10
-
-
-def _align(n: int, to: int = 8) -> int:
-    return -(-n // to) * to
-
-
-def build_elf(
-    needed: list[str] | None,
-    *,
-    section_headers: bool = True,
-    unmapped_strtab: bool = False,
-    trailer: bytes = b"",
-) -> bytes:
-    """Build a minimal x86_64 shared object for pyelftools to parse.
-
-    ``needed=None`` builds a statically linked image with no ``PT_DYNAMIC``
-    segment. Virtual addresses equal file offsets, so one ``PT_LOAD`` maps the
-    whole file and ``DT_STRTAB`` resolves even without section headers;
-    ``unmapped_strtab`` points it outside the file instead.
-    """
-    dynamic = needed is not None
-    phnum = 2 if dynamic else 1
-    out = bytearray(_EHDR.size + phnum * _PHDR.size)
-
-    dynstr_off = dynstr_size = dyn_off = dyn_size = 0
-    if dynamic:
-        dynstr = bytearray(b"\0")
-        name_offsets: list[int] = []
-        for name in needed:
-            name_offsets.append(len(dynstr))
-            dynstr += name.encode() + b"\0"
-        dynstr_off, dynstr_size = len(out), len(dynstr)
-        out += dynstr
-        out += bytes(_align(len(out)) - len(out))
-        dyn_off = len(out)
-        for offset in name_offsets:
-            out += _DYN.pack(_DT_NEEDED, offset)
-        out += _DYN.pack(_DT_STRTAB, 0x7FFF0000 if unmapped_strtab else dynstr_off)
-        out += _DYN.pack(_DT_STRSZ, dynstr_size)
-        out += _DYN.pack(_DT_NULL, 0)
-        dyn_size = len(out) - dyn_off
-
-    shoff = shnum = shstrndx = 0
-    if section_headers:
-        shstrtab = b"\0.dynstr\0.dynamic\0.shstrtab\0"
-        shstrtab_off = len(out)
-        out += shstrtab
-        out += bytes(_align(len(out)) - len(out))
-        shoff = len(out)
-        sections = [_SHDR.pack(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)]
-        if dynamic:
-            sections.append(
-                _SHDR.pack(1, _SHT_STRTAB, 2, dynstr_off, dynstr_off,
-                           dynstr_size, 0, 0, 1, 0)
-            )  # fmt: skip
-            sections.append(
-                _SHDR.pack(9, _SHT_DYNAMIC, 3, dyn_off, dyn_off, dyn_size,
-                           1, 0, 8, _DYN.size)
-            )  # fmt: skip
-        sections.append(
-            _SHDR.pack(18, _SHT_STRTAB, 0, 0, shstrtab_off, len(shstrtab),
-                       0, 0, 1, 0)
-        )  # fmt: skip
-        shnum, shstrndx = len(sections), len(sections) - 1
-        out += b"".join(sections)
-
-    out += trailer
-    ident = b"\x7fELF\x02\x01\x01".ljust(16, b"\0")
-    out[: _EHDR.size] = _EHDR.pack(
-        ident, 3, 62, 1, 0, _EHDR.size, shoff, 0,
-        _EHDR.size, _PHDR.size, phnum, _SHDR.size, shnum, shstrndx,
-    )  # fmt: skip
-    phdrs = _PHDR.pack(_PT_LOAD, 5, 0, 0, 0, len(out), len(out), 0x1000)
-    if dynamic:
-        phdrs += _PHDR.pack(_PT_DYNAMIC, 6, dyn_off, dyn_off, dyn_off,
-                            dyn_size, dyn_size, 8)  # fmt: skip
-    out[_EHDR.size : _EHDR.size + len(phdrs)] = phdrs
-    return bytes(out)
-
 
 LIBS_ELF = build_elf(["libc.so.6"], trailer=b"libz payload")
 EXT_ELF = build_elf(["libz-abc123.so.1.3.1", "libc.so.6"])
@@ -110,7 +21,7 @@ EXT_ELF = build_elf(["libz-abc123.so.1.3.1", "libc.so.6"])
 _STRIPPED = build_elf(["libz.so.1"], section_headers=False)
 NON_UTF8_NAME_ELF = _STRIPPED.replace(b"libz.so.1", b"libz\xff.so1")
 HUGE_NAME_OFFSET_ELF = _STRIPPED.replace(
-    _DYN.pack(_DT_NEEDED, 1), _DYN.pack(_DT_NEEDED, 0xFFFFFFFFFFFFFFF0)
+    DYN.pack(DT_NEEDED, 1), DYN.pack(DT_NEEDED, 0xFFFFFFFFFFFFFFF0)
 )
 
 
