@@ -152,9 +152,11 @@ not "not present".
 
 ## Roadmap
 
-Each item is one pull request, sized to be implemented in about 20–30 agent
-turns and reviewed on a phone. Items marked *(maintainer input)* need a
-decision before any code is written. Done items are marked ✓.
+Each item is one pull request (see
+[Branches and pull requests](#branches-and-pull-requests)), sized to be
+implemented in about 20–30 agent turns and reviewed on a phone. Items marked
+*(maintainer input)* need a decision before any code is written. Done items
+are marked ✓.
 
 ### 0. Guardrails
 
@@ -351,6 +353,26 @@ Run as `python -m pypiscan <subcommand>`.
 After `uv tool install pre-commit`, run `pre-commit install` once per clone to
 enable the git hooks. `~/.local/bin` must be on your `PATH` so `uv` and
 `pre-commit` resolve.
+
+## Branches and pull requests
+
+- One pull request is open at a time. Each starts on a new branch cut from
+  the current `main` after the previous pull request has merged. A branch is
+  never reused for a second pull request.
+- Every pull request targets `main`. Branches are never stacked on other
+  branches, rebased or force-pushed. Work that has to wait goes on its own
+  branch from `main` and becomes a pull request when it's next.
+- Pull requests are squash-merged, and the branch is deleted afterwards.
+- Branch names are lowercase words joined by hyphens, with no `/`: one of
+  four prefixes, then a slug of two to four words.
+  - `roadmap-<item>-<slug>` for a roadmap item, such as
+    `roadmap-2.2-upstream-fixtures`.
+  - `docs-<slug>` for documentation changes outside the roadmap.
+  - `fix-<slug>` for fixes outside the roadmap.
+  - `chore-<slug>` for tooling, CI and dependency changes.
+- No dates, random suffixes or tool names in branch names. A session that
+  starts on an automatically named branch (such as `claude/…`) creates a
+  correctly named branch from `main` before its first commit.
 
 ## License
 
