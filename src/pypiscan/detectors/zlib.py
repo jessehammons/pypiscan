@@ -25,30 +25,39 @@ ZLIB = Detector(
             re.compile(
                 rb" deflate "
                 + _VERSION
-                + rb" Copyright 1995-[0-9]{4} Jean-loup Gailly and Mark Adler \x00"
+                + rb" Copyright 1995(?:-[0-9]{4})? Jean-loup Gailly"
+                + rb"(?: and Mark Adler)? \x00"
             ),
-            "madler/zlib deflate.c:54-55 @ v1.3.2 (deflate_copyright)",
+            # " and Mark Adler" from v1.2.3.5; v0.71-v0.95 carry no version.
+            "madler/zlib deflate.c (deflate_copyright) @ v0.99-v1.3.2; "
+            "file:line per tag in tests/upstream/zlib.tsv",
         ),
         Pattern(
             "zlib",
             "library_string",
             re.compile(
-                rb" inflate " + _VERSION + rb" Copyright 1995-[0-9]{4} Mark Adler \x00"
+                rb" inflate "
+                + _VERSION
+                + rb" Copyright 1995(?:-[0-9]{4})? Mark Adler \x00"
             ),
-            "madler/zlib inftrees.c:25-26 @ v1.3.2 (inflate_copyright)",
+            "madler/zlib inftrees.c (inflate_copyright) @ v0.99-v1.3.2; "
+            "file:line per tag in tests/upstream/zlib.tsv",
         ),
         Pattern(
             "zlib-ng",
             "library_string",
             re.compile(rb" zlib-ng " + _VERSION + rb"(?: forked from zlib)?\x00"),
-            "zlib-ng/zlib-ng zutil.c:23-24 @ 2.0.0-2.0.7 (zlibng_string), "
-            "@ 2.1.0-beta1-2.3.3 (vstring)",
+            "zlib-ng/zlib-ng zutil.c (zlibng_string) @ 1.9.9-b1-2.0.7, "
+            "(vstring) @ 2.1.0-beta1-2.3.3; file:line per tag in "
+            "tests/upstream/zlib-ng.tsv",
         ),
         Pattern(
             "zlib-ng",
             "header_string",
             re.compile(_START + rb"(?P<version>[0-9]+(?:\.[0-9]+)+\.zlib-ng)\x00"),
-            "zlib-ng/zlib-ng zlib.h.in:61 @ 2.3.3 (ZLIB_VERSION, compat mode)",
+            "zlib-ng/zlib-ng zlib.h (ZLIB_VERSION, compat mode) @ 1.9.9-b1-2.0.7, "
+            "zlib.h.in @ 2.1.0-beta1-2.3.3; file:line per tag in "
+            "tests/upstream/zlib-ng.tsv",
         ),
     ),
     filename_patterns=(
