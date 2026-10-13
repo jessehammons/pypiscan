@@ -1,8 +1,9 @@
 """zlib and its derivative zlib-ng.
 
-zlib-ng carries classic zlib's deflate and inflate banners unchanged (2.3.3
-has the 1.3.1 banners byte for byte), so only its own ``vstring`` tells the
-two apart.
+zlib-ng carries zlib's deflate and inflate banners (2.3.3 has classic zlib
+1.3.1's banners byte for byte), so only its own identity string tells the two
+apart: ``zlibng_string`` in 2.0.x (" zlib-ng 2.0.6 forked from zlib") and
+``vstring`` from 2.1.0 on (" zlib-ng 2.3.3").
 """
 
 import re
@@ -39,8 +40,9 @@ ZLIB = Detector(
         Pattern(
             "zlib-ng",
             "library_string",
-            re.compile(rb" zlib-ng " + _VERSION + rb"\x00"),
-            "zlib-ng/zlib-ng zutil.c:23-24 @ 2.3.3 (vstring)",
+            re.compile(rb" zlib-ng " + _VERSION + rb"(?: forked from zlib)?\x00"),
+            "zlib-ng/zlib-ng zutil.c:23-24 @ 2.0.0-2.0.7 (zlibng_string), "
+            "@ 2.1.0-beta1-2.3.3 (vstring)",
         ),
         Pattern(
             "zlib-ng",

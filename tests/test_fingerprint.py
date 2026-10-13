@@ -110,6 +110,29 @@ def test_zlib_ng_is_never_reported_as_zlib() -> None:
     assert [kind for kind, _, _ in texts(record)] == ["library_string"] * 3
 
 
+@pytest.mark.parametrize(
+    ("banner_version", "year", "identity", "expected"),
+    [
+        # 2.0.0-2.0.6: banners say 1.2.11.f, and zlibng_string has a suffix.
+        ("1.2.11.f", "2016", b" zlib-ng 2.0.6 forked from zlib", "2.0.6"),
+        # 2.0.7: classic 1.2.11's version string with a 2022 copyright year.
+        ("1.2.11", "2022", b" zlib-ng 2.0.7 forked from zlib", "2.0.7"),
+        # 2.1 betas put the beta tag in the version itself.
+        ("1.2.13", "2022", b" zlib-ng 2.1.0.beta1", "2.1.0.beta1"),
+    ],
+    ids=["2.0.6", "2.0.7", "2.1.0-beta1"],
+)
+def test_zlib_ng_identity_string_across_releases(
+    banner_version: str, year: str, identity: bytes, expected: str
+) -> None:
+    banners = deflate(banner_version, year) + inflate(banner_version, year)
+    record = one(build_elf(None, rodata=b"\0" + banners + identity + b"\0"))
+
+    assert (record["library"], record["version"]) == ("zlib-ng", expected)
+    assert record["conflict"] is False
+    assert ("library_string", identity.decode(), ".rodata") in texts(record)
+
+
 def test_zlib_ng_compat_library_with_filename() -> None:
     rodata = ZLIB_NG_233 + b"1.3.1.zlib-ng\0"
     path = "pkg.libs/libz-0123abcd.so.1.3.1.zlib-ng"
