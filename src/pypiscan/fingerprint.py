@@ -24,18 +24,36 @@ Kind = Literal["library_string", "header_string", "filename"]
 
 
 @dataclass(frozen=True)
+class Citation:
+    """Where upstream defines a pattern's string: the C variable or macro
+    ``symbol``, whose literal starts at ``file:line`` at release ``tag`` of
+    the GitHub repository ``repo``. ``scripts/upstream_fixtures.py`` extracts
+    every cited symbol at every release tag."""
+
+    repo: str
+    tag: str
+    file: str
+    line: int
+    symbol: str
+
+    def __str__(self) -> str:
+        return f"{self.repo} {self.file}:{self.line} @ {self.tag} ({self.symbol})"
+
+
+@dataclass(frozen=True)
 class Pattern:
     """One string a detector looks for.
 
     ``regex`` must match a whole string and capture the version in a group
-    named ``version``. ``source`` cites the upstream file, line and release
-    tag that defines the string.
+    named ``version``. ``source`` cites the upstream definitions of a library
+    or header string, one citation per wording the regex accepts; for a
+    filename pattern it describes the naming convention instead.
     """
 
     library: str
     kind: Kind
     regex: re.Pattern[bytes]
-    source: str
+    source: tuple[Citation, ...] | str
 
 
 @dataclass(frozen=True)

@@ -1,13 +1,4 @@
 tag	location	string
-v0.71	deflate.c:54	 deflate Copyright 1995 Jean-loup Gailly 
-v0.79	deflate.c:54	 deflate Copyright 1995 Jean-loup Gailly 
-v0.8	deflate.c:54	 deflate Copyright 1995 Jean-loup Gailly 
-v0.9	deflate.c:54	 deflate Copyright 1995 Jean-loup Gailly 
-v0.91	deflate.c:54	 deflate Copyright 1995 Jean-loup Gailly 
-v0.92	deflate.c:54	 deflate Copyright 1995 Jean-loup Gailly 
-v0.93	deflate.c:54	 deflate Copyright 1995 Jean-loup Gailly 
-v0.94	deflate.c:54	 deflate Copyright 1995 Jean-loup Gailly 
-v0.95	deflate.c:54	 deflate Copyright 1995 Jean-loup Gailly 
 v0.99	deflate.c:54	 deflate 1.0 Copyright 1995-1996 Jean-loup Gailly 
 v0.99	inftrees.c:9	 inflate 1.0 Copyright 1995-1996 Mark Adler 
 v1.0-pre	deflate.c:54	 deflate 1.0 Copyright 1995 Jean-loup Gailly 

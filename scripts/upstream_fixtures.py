@@ -1,31 +1,39 @@
 """Write tests/upstream/<library>.tsv from a library's upstream git repository.
 
-At every release tag, read each string the library's detector patterns cite
-straight from its C literal, and write one row per tag and string: the tag,
-``file:line`` of the literal, and the string. The fixtures are committed;
-tests check the detector against every row (README roadmap 2.2).
+The strings to extract come from the detectors' citations
+(``pypiscan.fingerprint.Citation``): every symbol a pattern cites in the
+library's repository. At every release tag, the script reads each cited
+symbol's C literal straight from the source file and writes one row per tag
+and string: the tag, ``file:line`` of the literal, and the string. The
+fixtures are committed; tests check the detector against every row (README
+roadmap 2.2).
 
-The script reads a local clone, so cloning is the only step that needs the
-network, and it runs outside pytest:
+The script clones the repository into a temporary directory outside the
+working tree, so it needs the network and runs outside pytest:
 
-    git clone https://github.com/madler/zlib /tmp/zlib
-    uv run python scripts/upstream_fixtures.py zlib /tmp/zlib
+    uv run python scripts/upstream_fixtures.py zlib
+    uv run python scripts/upstream_fixtures.py zlib-ng
 
-    git clone https://github.com/zlib-ng/zlib-ng /tmp/zlib-ng
-    uv run python scripts/upstream_fixtures.py zlib-ng /tmp/zlib-ng
+``--repo PATH`` reads an existing clone instead.
 """
 
 import argparse
+import io
 import re
 import sys
-from collections.abc import Iterator
+import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from dulwich import porcelain
 from dulwich.object_store import tree_lookup_path
 from dulwich.objects import Blob, Commit
 from dulwich.refs import Ref
 from dulwich.repo import Repo
+
+from pypiscan.detectors import DETECTORS
+from pypiscan.fingerprint import Detector
 
 FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "upstream"
 
@@ -36,53 +44,55 @@ class ExtractError(Exception):
 
 @dataclass(frozen=True)
 class Source:
-    """One cited string: the files that may define it, first match wins, and
-    a regex for the text that introduces it (a declaration up to ``=``, or
-    ``#define NAME``)."""
+    """One cited symbol: a C variable whose initializer is the string, or,
+    for header strings, a ``#define``."""
 
-    paths: tuple[str, ...]
-    intro: re.Pattern[str]
+    file: str
+    symbol: str
+    is_define: bool
 
     @property
-    def is_define(self) -> bool:
-        return self.intro.pattern.startswith("#")
+    def intro(self) -> re.Pattern[str]:
+        """The text that introduces the literal: ``#define SYMBOL``, or a
+        declaration up to ``=``, allowing zlib-ng's ``PREFIX3(symbol)``."""
+        if self.is_define:
+            return re.compile(rf"#[ \t]*define[ \t]+{self.symbol}\b")
+        return re.compile(rf"\b(?:PREFIX[0-9]?\()?{self.symbol}\)?\[\]\s*=")
 
 
 @dataclass(frozen=True)
 class Library:
+    repo: str  # GitHub owner/name, as in Citation.repo
     tags: re.Pattern[str]  # full match selects the library's release tags
-    sources: tuple[Source, ...]
-
-
-def _decl(name: str) -> re.Pattern[str]:
-    return re.compile(rf"\b{name}\)?\[\]\s*=")
 
 
 LIBRARIES = {
-    # madler/zlib tags only releases. Before v0.99 the variable was named
-    # ``copyright`` and inftrees.c defined no banner.
-    "zlib": Library(
-        tags=re.compile(r"v[0-9].*"),
-        sources=(
-            Source(("deflate.c",), _decl("(?:deflate_)?copyright")),
-            Source(("inftrees.c",), _decl("inflate_copyright")),
-        ),
-    ),
+    # madler/zlib tags only releases.
+    "zlib": Library("madler/zlib", re.compile(r"v[0-9].*")),
     # zlib-ng/zlib-ng also carries madler/zlib's tags and the jtkv tags of
     # the fork it started from; its own releases are 1.9.9-b1 and 2.x.
     "zlib-ng": Library(
-        tags=re.compile(r"1\.9\.9-b1|v?2\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9]+)?"),
-        sources=(
-            Source(("zutil.c",), _decl(r"(?:zlibng_string|PREFIX3\(vstring)")),
-            Source(("deflate.c",), _decl("deflate_copyright")),
-            Source(("inftrees.c",), _decl("inflate_copyright")),
-            Source(
-                ("zlib.h.in", "zlib.h"),
-                re.compile(r"#[ \t]*define[ \t]+ZLIB_VERSION\b"),
-            ),
-        ),
+        "zlib-ng/zlib-ng",
+        re.compile(r"1\.9\.9-b1|v?2\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9]+)?"),
     ),
 }
+
+
+def cited_sources(repo: str, detectors: Iterable[Detector]) -> list[Source]:
+    """Every symbol the detectors cite in ``repo``, in citation order."""
+    found: dict[tuple[str, str], Source] = {}
+    for detector in detectors:
+        for pattern in detector.patterns:
+            if isinstance(pattern.source, str):
+                continue
+            for c in pattern.source:
+                if c.repo == repo:
+                    is_define = pattern.kind == "header_string"
+                    found.setdefault(
+                        (c.file, c.symbol), Source(c.file, c.symbol, is_define)
+                    )
+    return list(found.values())
+
 
 _TOKEN = re.compile(
     r"""(?P<space>[ \t\r]+|/\*.*?\*/|//[^\n]*)
@@ -136,53 +146,71 @@ def _read(repo: Repo, commit: Commit, path: str) -> str | None:
     return blob.data.decode("latin-1")
 
 
-def rows(repo_dir: Path, library: Library) -> Iterator[tuple[str, str, str]]:
-    """Yield ``(tag, file:line, string)`` for every release tag, oldest
-    tagged commit first."""
-    repo = Repo(str(repo_dir))
+def rows(
+    repo: Repo, tag_pattern: re.Pattern[str], sources: list[Source]
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Return ``(tag, file:line, string)`` rows for every release tag, oldest
+    tagged commit first, and the selected tags where no source was found."""
     tags: list[tuple[int, str, Commit]] = []
     for ref in repo.refs.keys(base=Ref(b"refs/tags")):
-        if library.tags.fullmatch(tag := ref.decode()):
+        if tag_pattern.fullmatch(tag := ref.decode()):
             commit = repo[repo.get_peeled(Ref(b"refs/tags/" + ref))]
             if not isinstance(commit, Commit):
                 raise ExtractError(f"tag {tag} does not point at a commit")
             tags.append((commit.commit_time, tag, commit))
+    found: list[tuple[str, str, str]] = []
+    empty: list[str] = []
     for _, tag, commit in sorted(tags, key=lambda t: t[:2]):
-        for source in library.sources:
-            for path in source.paths:
-                text = _read(repo, commit, path)
-                if text is None:
-                    continue
-                try:
-                    result = extract(text, source)
-                except ExtractError as e:
-                    raise ExtractError(f"{tag}:{path}: {e}") from None
-                if result is not None:
-                    line, string = result
-                    yield tag, f"{path}:{line}", string
-                break
+        before = len(found)
+        for source in sources:
+            text = _read(repo, commit, source.file)
+            if text is None:
+                continue
+            try:
+                result = extract(text, source)
+            except ExtractError as e:
+                raise ExtractError(f"{tag}:{source.file}: {e}") from None
+            if result is not None:
+                line, string = result
+                found.append((tag, f"{source.file}:{line}", string))
+        if len(found) == before:
+            empty.append(tag)
+    return found, empty
 
 
-def write_tsv(out: Path, data: Iterator[tuple[str, str, str]]) -> int:
-    lines = ["tag\tlocation\tstring"]
-    lines += ["\t".join(row) for row in data]
+def write_fixture(repo: Repo, name: str, out_dir: Path) -> None:
+    library = LIBRARIES[name]
+    found, empty = rows(repo, library.tags, cited_sources(library.repo, DETECTORS))
+    out = out_dir / f"{name}.tsv"
+    lines = ["tag\tlocation\tstring", *("\t".join(row) for row in found)]
     out.write_text("\n".join(lines) + "\n", encoding="ascii")
-    return len(lines) - 1
+    tags = len({tag for tag, _, _ in found})
+    print(f"{name}: {tags} tags, {len(found)} rows -> {out}", file=sys.stderr)
+    if empty:
+        print(f"{name}: no cited string at: {' '.join(empty)}", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("library", choices=sorted(LIBRARIES))
-    parser.add_argument("repo", type=Path, help="local clone of the upstream repo")
+    parser.add_argument("--repo", type=Path, help="read this clone; don't clone")
     parser.add_argument("--out-dir", type=Path, default=FIXTURES)
     args = parser.parse_args(argv)
-    out = args.out_dir / f"{args.library}.tsv"
     try:
-        count = write_tsv(out, rows(args.repo, LIBRARIES[args.library]))
+        if args.repo is not None:
+            with Repo(str(args.repo)) as repo:
+                write_fixture(repo, args.library, args.out_dir)
+        else:
+            url = f"https://github.com/{LIBRARIES[args.library].repo}"
+            with tempfile.TemporaryDirectory(prefix="upstream-fixtures-") as tmp:
+                print(f"cloning {url} into {tmp}", file=sys.stderr)
+                with porcelain.clone(
+                    url, tmp, bare=True, checkout=False, errstream=io.BytesIO()
+                ) as repo:
+                    write_fixture(repo, args.library, args.out_dir)
     except ExtractError as e:
         print(f"upstream_fixtures: error: {e}", file=sys.stderr)
         return 1
-    print(f"wrote {count} rows to {out}", file=sys.stderr)
     return 0
 
 

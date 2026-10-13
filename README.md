@@ -291,8 +291,9 @@ version parsing.
     confirm both report zlib-ng 2.3.3, never classic zlib.
 - **2.2** ✓ Upstream string fixtures. A script reads a library's upstream git
   repository and, at every release tag, extracts each string the detector's
-  patterns cite. It reads the C literal directly, and runs the preprocessor
-  only when a string is assembled from macros. It writes
+  patterns cite. It reads the C literal directly; no zlib or zlib-ng string
+  is assembled from macros, so one that is stops the script with an error
+  until a preprocessor step is added. It writes
   `tests/upstream/<library>.tsv` with one row per tag and string: tag, file
   and line, and the string. The fixtures are text and are committed;
   generating them needs the network, so the script runs outside pytest.
@@ -456,9 +457,10 @@ Run as `python -m pypiscan <subcommand>`.
 - `uv run pytest`: run the tests (coverage is wired in via `pyproject.toml`).
 - `scripts/check.sh`: runs exactly what CI runs. If it passes locally, CI
   should pass.
-- `uv run python scripts/upstream_fixtures.py <library> <clone>`: regenerate
-  `tests/upstream/<library>.tsv` from a local clone of the library's upstream
-  repository (see the script's docstring for the clone URLs).
+- `uv run python scripts/upstream_fixtures.py <library>`: clone the
+  library's upstream repository into a temporary directory and regenerate
+  `tests/upstream/<library>.tsv` from the detectors' citations. Needs the
+  network.
 
 After `uv tool install pre-commit`, run `pre-commit install` once per clone to
 enable the git hooks. `~/.local/bin` must be on your `PATH` so `uv` and

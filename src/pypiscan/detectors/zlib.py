@@ -8,7 +8,7 @@ apart: ``zlibng_string`` in 2.0.x (" zlib-ng 2.0.6 forked from zlib") and
 
 import re
 
-from pypiscan.fingerprint import Detector, Pattern
+from pypiscan.fingerprint import Citation, Detector, Pattern
 
 # Library strings start with their own distinctive text and end with NUL. The
 # byte before them can be unrelated data, so they don't require a boundary.
@@ -28,9 +28,21 @@ ZLIB = Detector(
                 + rb" Copyright 1995(?:-[0-9]{4})? Jean-loup Gailly"
                 + rb"(?: and Mark Adler)? \x00"
             ),
-            # " and Mark Adler" from v1.2.3.5; v0.71-v0.95 carry no version.
-            "madler/zlib deflate.c (deflate_copyright) @ v0.99-v1.3.2; "
-            "file:line per tag in tests/upstream/zlib.tsv",
+            (
+                Citation("madler/zlib", "v1.3.2", "deflate.c", 55, "deflate_copyright"),
+                # Before v1.2.3.5, no " and Mark Adler".
+                Citation(
+                    "madler/zlib", "v1.2.3.4", "deflate.c", 55, "deflate_copyright"
+                ),
+                # A single year, not a range.
+                Citation(
+                    "madler/zlib", "v1.0-pre", "deflate.c", 54, "deflate_copyright"
+                ),
+                # zlib-ng carries the banner too; see the module docstring.
+                Citation(
+                    "zlib-ng/zlib-ng", "2.3.3", "deflate.c", 61, "deflate_copyright"
+                ),
+            ),
         ),
         Pattern(
             "zlib",
@@ -40,24 +52,38 @@ ZLIB = Detector(
                 + _VERSION
                 + rb" Copyright 1995(?:-[0-9]{4})? Mark Adler \x00"
             ),
-            "madler/zlib inftrees.c (inflate_copyright) @ v0.99-v1.3.2; "
-            "file:line per tag in tests/upstream/zlib.tsv",
+            (
+                Citation(
+                    "madler/zlib", "v1.3.2", "inftrees.c", 26, "inflate_copyright"
+                ),
+                # A single year, not a range.
+                Citation(
+                    "madler/zlib", "v1.0-pre", "inftrees.c", 9, "inflate_copyright"
+                ),
+                Citation(
+                    "zlib-ng/zlib-ng", "2.3.3", "inftrees.c", 10, "inflate_copyright"
+                ),
+            ),
         ),
         Pattern(
             "zlib-ng",
             "library_string",
             re.compile(rb" zlib-ng " + _VERSION + rb"(?: forked from zlib)?\x00"),
-            "zlib-ng/zlib-ng zutil.c (zlibng_string) @ 1.9.9-b1-2.0.7, "
-            "(vstring) @ 2.1.0-beta1-2.3.3; file:line per tag in "
-            "tests/upstream/zlib-ng.tsv",
+            (
+                Citation("zlib-ng/zlib-ng", "2.3.3", "zutil.c", 24, "vstring"),
+                # Named zlibng_string, worded "... forked from zlib", until 2.1.0.
+                Citation("zlib-ng/zlib-ng", "2.0.7", "zutil.c", 24, "zlibng_string"),
+            ),
         ),
         Pattern(
             "zlib-ng",
             "header_string",
             re.compile(_START + rb"(?P<version>[0-9]+(?:\.[0-9]+)+\.zlib-ng)\x00"),
-            "zlib-ng/zlib-ng zlib.h (ZLIB_VERSION, compat mode) @ 1.9.9-b1-2.0.7, "
-            "zlib.h.in @ 2.1.0-beta1-2.3.3; file:line per tag in "
-            "tests/upstream/zlib-ng.tsv",
+            # Compat mode; the header became a template in 2.1.0.
+            (
+                Citation("zlib-ng/zlib-ng", "2.3.3", "zlib.h.in", 61, "ZLIB_VERSION"),
+                Citation("zlib-ng/zlib-ng", "2.0.7", "zlib.h", 57, "ZLIB_VERSION"),
+            ),
         ),
     ),
     filename_patterns=(
