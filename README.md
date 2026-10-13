@@ -179,12 +179,12 @@ version parsing.
 
 ### 2. Fingerprint
 
-- **2.1** Detector framework plus the zlib family, following
+- **2.1** ✓ Detector framework plus the zlib family, following
   [How versions are identified](#how-versions-are-identified):
   `fingerprint <wheel>` reports library, version and the evidence that
   matched, and tells classic zlib apart from zlib-ng (their CVE histories
   differ). Adding a library later means adding one detector, not changing
-  the scanner or the output format. **← current** Manual checks:
+  the scanner or the output format. Manual checks:
   - lxml 6.1.3: zlib 1.3.2, `contains`, in both `lxml/etree` and
     `lxml/objectify` (one record each).
   - grpcio 1.84.0: zlib 1.3.1.1, `contains`, in `grpc/_cython/cygrpc`.
@@ -196,7 +196,7 @@ version parsing.
     2.3.3 from upstream source in a temporary directory, in both compat and
     native modes, pack each shared library into a throwaway wheel, and
     confirm both report zlib-ng 2.3.3, never classic zlib.
-- **2.2** libpng, libjpeg-turbo and libtiff detectors.
+- **2.2** libpng, libjpeg-turbo and libtiff detectors. **← current**
 - **2.3** OpenSSL (told apart from BoringSSL, LibreSSL and AWS-LC), expat and
   sqlite detectors.
 - **2.4** *(maintainer input)* libwebp: it embeds no plain version string, so
