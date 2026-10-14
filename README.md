@@ -358,8 +358,13 @@ the package list. One row per prefix, library and way of identifying it:
   `openssl-{version}`). **repo** is required on every mapped row, and so
   is **tags** from roadmap 4.1 on: phase 06 clones every library and lists
   its release tags, and the range verifier (6.3) reads them. **tags** has
-  exactly one `{version}` and no other placeholder. Rows for one library
-  agree on **repo**, **tags**, **cpe** and **osv**.
+  exactly one `{version}` and no other placeholder. Some projects spell
+  versions in tags with `_` or `-` (PostgreSQL's `REL_18_6`, OpenLDAP's
+  `OPENLDAP_REL_ENG_2_6_15`, FreeType's `VER-2-14-3`), so in **tags**,
+  `{version}` also takes `_`, and the version listed for a tag has each `_`
+  or `-` between two digits replaced by `.`: `REL_{version}` lists
+  `REL_18_6` as 18.6. Rows for one library agree on **repo**, **tags**,
+  **cpe** and **osv**.
 - **kind** is one of the version-setting kinds in
   [How versions are identified](#how-versions-are-identified), and
   **pattern** is the recognizer:
