@@ -36,7 +36,7 @@ In scope:
 - Version detection for a growing list of libraries, starting with zlib and
   zlib-ng, libpng, libjpeg-turbo, libtiff, libwebp, OpenSSL, expat and
   sqlite. The order of additions is set by how often each library appears in
-  the scanned wheels (roadmap item 3.5), and a library is added as rows in
+  the scanned wheels (roadmap item 3.7), and a library is added as rows in
   the [library map](#the-library-map).
 - A curated CVE table covering high and critical CVEs from 2020 onward for
   those libraries.
@@ -116,8 +116,8 @@ Rules for detectors:
 - Patterns match whole strings, such as a full banner, and capture the
   version from inside them. A pattern for a bare version number also matches
   header strings and unrelated data.
-- Candidate patterns come from discovery across real wheels (roadmap 2.3
-  and 3.5): version-like strings grouped by the text around them, and the
+- Candidate patterns come from discovery across real wheels (roadmap 3.5
+  and 3.7): version-like strings grouped by the text around them, and the
   library map's identity strings. Upstream
   source then confirms each candidate: which file defines it, and whether
   it is a library string or a header string.
@@ -183,7 +183,8 @@ pypiscan scan <package-list> --library-map M --episode-dir D --cache-dir C --cou
   is an error and exits 2; a value larger than the list is clamped to its
   length.
 - `--library-map` names the committed library map, normally
-  `data/libraries.csv`.
+  `data/libraries.csv`. It arrives with phase 05 (roadmap 3.7); until then
+  `scan` doesn't take it.
 - The episode directory holds one run's results. The cache directory holds
   downloaded wheels, named by sha256, and upstream clones, both shared
   between episodes.
@@ -191,10 +192,13 @@ pypiscan scan <package-list> --library-map M --episode-dir D --cache-dir C --cou
 Each package's **target wheel** is the one pip would choose for CPython 3.12
 on manylinux x86_64 with glibc 2.28 or older. That includes `abi3` wheels
 (cryptography's are abi3 and link OpenSSL statically) and
-`py3-none-manylinux…` wheels. Yanked files are never chosen, and a release
-with only pure-Python wheels has no target. A target wheel larger than
-100 MB, by the size PyPI reports, is skipped as `too_large` before anything
-is downloaded.
+`py3-none-manylinux…` wheels. Yanked files are never chosen. A release
+with only pure-Python wheels has no target, and phase 01 records it as
+`skipped` with reason `no_target`. A target wheel larger than the wheel
+size limit, 100 MB by the size PyPI reports, resolves normally in phase 01,
+and phase 02 records it as `skipped` with reason `too_large` without
+downloading it. Phase 03 skips zip members larger than the zip-member size
+limit, 512 MB uncompressed, since each member is read into memory.
 
 Phases, in order. Per-package phases have one line per package; per-library
 phases have one line per library in the map.
@@ -213,13 +217,16 @@ Part 1:
    hash and version suffix (`libjpeg-1a2b3c4d.so.62.4.0` becomes
    `libjpeg`). Then the phase writes the library report into the episode:
    for each prefix, how many wheels and files carry it and its most
-   common `strings` templates. Prefixes the map doesn't list go to
-   `library-map-todo.csv` in the episode, one row each.
+   common `strings` templates.
 
-**Manual step.** If `library-map-todo.csv` has rows, `scan` stops after
-phase 05, lists the prefixes on stderr and exits 3. The maintainer reads
-the report and, for each prefix, adds rows to the library map (or marks the
-prefix `skip`), commits the map, and reruns `scan`.
+**Manual step.** Once phase 05 is finished, in this run or an earlier one,
+every run compares phase 05's prefixes with the current library map and
+rewrites `library-map-todo.csv` in the episode, one row per prefix the map
+doesn't list. It is derived from the map, not a phase file, so it is never
+skipped as finished. If it has rows, `scan` lists the prefixes on stderr and
+exits 3. The maintainer reads the report and, for each prefix, adds rows to
+the library map (or marks the prefix `skip`), commits the map, and reruns
+`scan`, which goes on to phase 06 once the todo is empty.
 
 Part 2:
 
@@ -266,6 +273,8 @@ the package list. One row per prefix, library and identity string:
   upstream source, and that is what the manual step is for.
 - `skip` marks a prefix the maintainer has looked at and isn't tracking,
   so it doesn't come back as a TODO.
+- A map with only its header row is valid: part 1's first run starts from
+  one.
 - To find a prefix's upstream, read its most common strings in the library
   report (most libraries embed their project name and copyright), and
   check the package's build scripts, such as Pillow's
@@ -278,15 +287,15 @@ Rules:
   printed to stderr and exits 2:
   1. The episode and cache directories are outside any git working tree.
   2. The package list loads (roadmap 3.2), and so does the library map
-     (roadmap 3.5).
+     (roadmap 3.7).
   3. The episode's phase files are a run of finished phases with no gaps
      (01, 02, …) and no `.partial` file. Otherwise the error names every
      file to delete.
   4. If the episode has an `episode.json`, it matches this run's inputs: the
-     list file's sha256, the count, the target and the size limit. A smoke
-     run at `--count 2` and another at `--count 10` therefore need separate
-     episode directories. The code version is recorded but not matched, so a
-     phase can be rerun after a fix.
+     list file's sha256, the count after clamping, the target and both size
+     limits. A smoke run at `--count 2` and another at `--count 10`
+     therefore need separate episode directories. The code version is
+     recorded but not matched, so a phase can be rerun after a fix.
   5. The library map is expected to change between parts 1 and 2, so it
      isn't matched from the start. Phase 06 records its sha256; if the map
      has changed since, the error names phase 06's file and every later one
@@ -297,8 +306,9 @@ Rules:
   nested inside the package's line, in the `inspect`, `strings` and
   `fingerprint` record formats. A package whose line in the previous
   per-package phase isn't `ok` gets a `skipped` line, never a missing one,
-  so every finished phase file has exactly one line per package or
-  library. A bad zip or malformed ELF becomes an `error` line, not a crash.
+  whose reason is the phase where its line first wasn't `ok` (such as
+  `02-fetch`). Every finished phase file has exactly one line per package
+  or library. A bad zip or malformed ELF becomes an `error` line, not a crash.
 - **Phase files are written whole or not at all.** A phase writes
   `NN-<phase>.jsonl.partial` and renames it to `NN-<phase>.jsonl` when it
   finishes. A rerun skips finished phases. There is no resuming partway
@@ -392,51 +402,85 @@ version parsing.
   differences between tag names and strings (`2.1.0-beta1` versus
   `2.1.0.beta1`). A tag the detector misclassifies or misses fails the
   tests. Covers zlib and zlib-ng at every release tag.
-- **2.3** `pypiscan strings <wheel>` lists, for each ELF binary, every
-  printable string that contains a version-like token (digit runs separated
-  by dots), with its offset and a template in which each digit run becomes
-  `#`: `deflate 1.3.2 Copyright 1995-2026 …` becomes
-  `deflate #.#.# Copyright #-# …`. Offline, like `inspect`. Grouping
-  templates across many wheels is `scan`'s library report (3.5). Manual
-  check: for lxml 6.1.3, `lxml/etree` lists zlib's `deflate` banner with that
-  template. **← current**
 
 ### 3. Scan, part 1: find the bundled libraries
 
 Builds `scan` through the manual step, following
 [How a scan runs](#how-a-scan-runs).
 
+From 3.3 on there is a `scan` that runs, and each later item adds to it.
+`scan` runs the phases built so far and exits 0 after the last one; the
+stop for the manual step arrives with phase 05 (3.7). After an item
+merges, rerun the same command on the same episode: finished phases are
+skipped, so only the new phase runs, because pre-flight matches the run's
+inputs and not the code version. To rerun a phase after a fix, delete its
+file and every later one. Smoke runs use the smoke list (3.2) with a small
+`--count` and one episode directory per count, outside the repository:
+
+```bash
+uv run python -m pypiscan scan data/smoke.csv \
+  --episode-dir ~/pypiscan/episodes/smoke-4 \
+  --cache-dir ~/pypiscan/cache --count 4
+```
+
 - **3.1** PyPI client and wheel selection, plus
   `fetch <name>==<version> --cache-dir C`: read one release from PyPI's JSON
   API, choose its target wheel, download it into the cache and verify its
   sha256. Tests use recorded responses. Manual check: for five packages, the
   chosen file matches what `uvx pip download` picks with the flags in
-  [Conventions](#conventions).
-- **3.2** The package list: `data/packages.csv`, with columns `name` and
-  `version`, at most 100 rows, in processing order. The loader rejects an
-  empty list, missing fields, and names that collide after PEP 503
-  normalization (`Pillow` and `pillow` are the same package). A script
-  outside pytest generates the list: it walks a top-pypi-packages snapshot
-  in rank order, keeps each project whose latest final release has a target
-  wheel, and stops at 100. Most top packages are pure Python, so this goes
-  well past rank 100. Wheels over the size limit stay on the list; the
-  limit is applied when scanning, so raising it doesn't mean regenerating
-  the list. The snapshot month and the selection rule go in
-  `data/README.md`. Versions are pinned, and refreshing the list is its own
-  pull request.
-- **3.3** `scan` with pre-flight, the episode directory and phases 01 and
-  02.
-- **3.4** Phases 03 and 04. A bad zip or malformed ELF becomes an `error`
-  line; zip members over an uncompressed size limit are recorded and
-  skipped.
-- **3.5** Phase 05, the library map's format and loader, the library
-  report, `library-map-todo.csv` and the stop for the manual step. The
-  loader rejects missing fields, unknown columns and a prefix that is both
-  `skip` and mapped. Manual check: a full run with `--count 100`; the PR
-  includes the library report's prefixes, ordered by how many wheels carry
-  them.
-- **3.6** *(maintainer input)* The first library map: rows for the prefixes
-  in 3.5's report, most frequent first, chosen by the maintainer.
+  [Conventions](#conventions). **← current**
+- **3.2** The package list format and loader, and the smoke list. A package
+  list is a CSV file with columns `name` and `version`, at most 100 rows, in
+  processing order. The loader rejects an empty list, more than 100 rows,
+  missing fields, and names that collide after PEP 503 normalization
+  (`Pillow` and `pillow` are the same package). The smoke list,
+  `data/smoke.csv`, is hand-picked, at most 10 rows, ordered so that small
+  counts exercise the most: first a wheel with a `<package>.libs/`
+  directory (such as Pillow) and one with statically linked zlib (such as
+  lxml), then a release with only pure-Python wheels (`no_target`) and one
+  whose target wheel is over the wheel size limit (`too_large`). Each row
+  pins the package's latest final release when the list is written.
+  `data/README.md` says why each row is there. Manual check: every row's
+  release exists on PyPI.
+- **3.3** `scan`'s first runnable version: the command-line rules,
+  pre-flight checks 1 to 4 without the library map, `episode.json`, and
+  the phase runner
+  (`.partial` files, one line per package, `skipped` lines, Ctrl-C, exit
+  codes, counts on stderr), with phase 01. `episode.json` records both size
+  limits from the start, although the zip-member limit is first applied in
+  3.4, so episodes from smoke runs stay usable as phases are added. Manual
+  check: a smoke run with `--count 4`, its `01-resolve.jsonl`, and a
+  second run of the same command that skips phase 01 and exits 0.
+- **3.4** Phases 02 and 03. Phase 02 reuses 3.1's download and skips
+  wheels over the wheel size limit as `too_large`. In phase 03, a bad zip or
+  malformed ELF becomes an `error` line, and zip members over the
+  zip-member size limit are recorded and skipped. Manual check: rerunning
+  3.3's smoke episode runs only phases 02 and 03.
+- **3.5** `pypiscan strings <wheel>` and phase 04. `strings` lists, for each
+  ELF binary, every printable string that contains a version-like token
+  (digit runs separated by dots), with its offset and a template in which
+  each digit run becomes `#`: `deflate 1.3.2 Copyright 1995-2026 …` becomes
+  `deflate #.#.# Copyright #-# …`. Offline, like `inspect`. Grouping
+  templates across many wheels is `scan`'s library report (3.7). Manual
+  check: for lxml 6.1.3, `lxml/etree` lists zlib's `deflate` banner with
+  that template, and rerunning the smoke episode runs only phase 04.
+- **3.6** The full package list, `data/packages.csv`. A script outside
+  pytest generates it: it walks a top-pypi-packages snapshot in rank order,
+  keeps each project whose latest final release has a target wheel, and
+  stops at 100. Most top packages are pure Python, so this goes well past
+  rank 100. Wheels over the wheel size limit stay on the list; the limit is
+  applied when scanning, so raising it doesn't mean regenerating the list.
+  The snapshot month and the selection rule go in `data/README.md`.
+  Versions are pinned, and refreshing the list is its own pull request.
+- **3.7** Phase 05, `--library-map`, the library map's format and loader
+  (pre-flight check 2), the library report, `library-map-todo.csv` and the
+  stop for the manual step. The loader accepts a map with only its header
+  row, and rejects missing fields, unknown columns and a prefix that is both
+  `skip` and mapped. Manual check: a full run of `data/packages.csv` with
+  `--count 100`; the PR includes the library report's prefixes, ordered by
+  how many wheels carry them.
+- **3.8** *(maintainer input)* The first library map: rows for the prefixes
+  in 3.7's report, most frequent first, chosen by the maintainer.
 
 Later: a per-wheel time limit, which needs a subprocess per wheel.
 
@@ -542,11 +586,16 @@ Adding a library means adding rows to the library map, not code.
   genuinely needs a live network is an end-to-end check that lives outside
   the pytest suite.
 - Wheels for manual checks are downloaded with `uvx pip download`, since uv
-  virtual environments don't include pip. For example:
+  virtual environments don't include pip. pip doesn't widen an explicit
+  `--platform manylinux_2_28_x86_64` to older glibc versions (it widens only
+  the legacy `manylinux2014` and `manylinux2010` tags), so every
+  `manylinux_2_N` tag is listed to match the target wheel's rule. For
+  example:
 
   ```bash
   uvx pip download --only-binary=:all: --no-deps \
-    --platform manylinux_2_28_x86_64 --platform manylinux2014_x86_64 \
+    $(for n in $(seq 28 -1 5); do echo --platform manylinux_2_${n}_x86_64; done) \
+    --platform manylinux2014_x86_64 \
     --python-version 3.12 -d /tmp/wheels pillow
   ```
 
