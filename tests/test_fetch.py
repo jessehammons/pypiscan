@@ -1,4 +1,5 @@
 import hashlib
+import http.client
 import io
 import json
 import urllib.error
@@ -16,6 +17,7 @@ from pypiscan.pypi import (
     PyPIError,
     UrllibClient,
     WheelFile,
+    _wheel_file,
     release_files,
     select_target,
     target_platforms,
@@ -157,6 +159,26 @@ def test_select_target_rejects_malformed_entry() -> None:
 
 
 @pytest.mark.parametrize(
+    "sha256", ["../..", "AB" * 32, "ab" * 31, "ab" * 32 + "\n", "g" * 64]
+)
+def test_wheel_file_rejects_bad_sha256(sha256: str) -> None:
+    entry = wheel_entry("x-1-cp312-cp312-manylinux_2_28_x86_64.whl")
+    entry["digests"] = {"sha256": sha256}
+    with pytest.raises(PyPIError, match="64 lowercase hex digits"):
+        _wheel_file(entry)
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["../x-1-cp312-cp312-manylinux_2_28_x86_64.whl", "a/b.whl", "/b.whl", "..", ""],
+)
+def test_wheel_file_rejects_paths_as_filenames(filename: str) -> None:
+    # Checked directly: packaging's own filename rules vary by version.
+    with pytest.raises(PyPIError, match="not a single path component"):
+        _wheel_file(wheel_entry(filename))
+
+
+@pytest.mark.parametrize(
     ("body", "message"),
     [(b"<html>", "not JSON"), (b"[]", "no 'urls' list"), (b"{}", "no 'urls' list")],
 )
@@ -260,19 +282,30 @@ class RecordedResponse(urllib.response.addinfourl):
     msg = "recorded"
 
 
+class TruncatedBody(io.BytesIO):
+    """A chunked body cut off after its first chunk."""
+
+    def read(self, size: int | None = -1) -> bytes:
+        if self.tell():
+            raise http.client.IncompleteRead(b"", 10)
+        return super().read(size)
+
+
 class FakeHTTPS(urllib.request.BaseHandler):
     """Answers HTTPS requests in-process, standing in for the network."""
 
-    def __init__(self, status: int, body: bytes) -> None:
+    def __init__(self, status: int, body: bytes = b"") -> None:
         self.status = status
         self.body = body
 
     def https_open(self, req: urllib.request.Request) -> RecordedResponse:
-        if self.status < 0:
+        if self.status == -1:
             raise urllib.error.URLError("connection refused")
-        return RecordedResponse(
-            io.BytesIO(self.body), Message(), req.full_url, self.status
-        )
+        if self.status == -2:
+            raise http.client.BadStatusLine("garbled")
+        body = TruncatedBody if self.status == -3 else io.BytesIO
+        status = max(self.status, 200)
+        return RecordedResponse(body(self.body), Message(), req.full_url, status)
 
 
 def urllib_client(status: int, body: bytes = b"") -> UrllibClient:
@@ -292,11 +325,17 @@ def test_urllib_client_streams_body() -> None:
 
 
 @pytest.mark.parametrize(
-    ("status", "message"), [(404, "HTTP 404"), (-1, "connection refused")]
+    ("status", "message"),
+    [
+        (404, "HTTP 404"),
+        (-1, "connection refused"),
+        (-2, "garbled"),
+        (-3, "IncompleteRead"),
+    ],
 )
 def test_urllib_client_raises_pypi_error(status: int, message: str) -> None:
     with pytest.raises(PyPIError, match=message):
-        list(urllib_client(status).stream("https://h/x"))
+        list(urllib_client(status, b"partial body").stream("https://h/x"))
 
 
 @pytest.mark.parametrize("url", ["http://pypi.org/x", "file:///etc/passwd"])

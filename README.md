@@ -186,8 +186,10 @@ pypiscan scan <package-list> --library-map M --episode-dir D --cache-dir C --cou
   `data/libraries.csv`. It arrives with phase 05 (roadmap 3.7); until then
   `scan` doesn't take it.
 - The episode directory holds one run's results. The cache directory holds
-  downloaded wheels, named by sha256, and upstream clones, both shared
-  between episodes.
+  downloaded wheels and upstream clones, both shared between episodes. A
+  wheel is stored as `wheels/<sha256>/<filename>`: a directory named by
+  its sha256, holding the file under its original name. It is written as
+  `<filename>.partial` and renamed only once its sha256 matches PyPI's.
 
 Each package's **target wheel** is the one pip would choose for CPython 3.12
 on manylinux x86_64 with glibc 2.28 or older. That includes `abi3` wheels

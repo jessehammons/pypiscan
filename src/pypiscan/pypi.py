@@ -5,12 +5,15 @@ x86_64 with glibc 2.28 or older. Yanked files are never chosen, and
 pure-Python (``-any``) wheels are not targets.
 """
 
+import http.client
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, cast
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
@@ -27,6 +30,7 @@ MIN_GLIBC_MINOR = 5
 LEGACY_MANYLINUX = {17: "manylinux2014", 12: "manylinux2010", 5: "manylinux1"}
 CHUNK_SIZE = 1 << 20
 TIMEOUT_SECONDS = 60
+SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 
 
 class PyPIError(Exception):
@@ -71,7 +75,7 @@ class UrllibClient:
                     yield chunk
         except urllib.error.HTTPError as exc:
             raise PyPIError(f"{url}: HTTP {exc.code}") from exc
-        except (urllib.error.URLError, OSError) as exc:
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
             raise PyPIError(f"{url}: {exc}") from exc
 
 
@@ -133,6 +137,11 @@ def _wheel_file(entry: dict[str, object]) -> WheelFile:
         or not isinstance(uploaded, str)
     ):
         raise PyPIError(f"malformed file entry: {filename!r}")
+    # Both become cache path components, so neither may leave the cache.
+    if not SHA256_HEX.fullmatch(sha256):
+        raise PyPIError(f"{filename}: sha256 is not 64 lowercase hex digits")
+    if Path(filename).name != filename or filename in ("", ".."):
+        raise PyPIError(f"{filename!r}: filename is not a single path component")
     return WheelFile(filename, url, sha256, size, uploaded)
 
 
