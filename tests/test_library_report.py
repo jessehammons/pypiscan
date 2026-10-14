@@ -88,7 +88,7 @@ def test_every_noise_pattern_is_tested() -> None:
         "1.2.840.10045.2.1",
         "2.16.840.1.101.3.4.1.42",
         "AES-256-CBC:AES256:2.16.840.1.101.3.4.1.42",
-        "1.2.3.4.5",
+        "1.2.3.4.5.6",
     ],
 )
 def test_strings_with_only_object_identifiers_are_noise(text: str) -> None:
@@ -104,6 +104,9 @@ def test_strings_with_only_object_identifiers_are_noise(text: str) -> None:
         "127.0.0.1",
         "ANSI X9.62",
         "id-ecPublicKey 1.2.840.10045.2.1 in OpenSSL 3.5.8",
+        # Five parts can be a release version, so they're kept.
+        "1.2.3.4.5",
+        "OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY",
     ],
 )
 def test_strings_with_a_release_like_token_are_kept(text: str) -> None:

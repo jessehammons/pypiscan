@@ -138,13 +138,14 @@ Only strings in data sections (`.rodata`, `.data` and `.data.rel.ro`)
 count, and known noise is removed: compiler and build notes (`GCC:`,
 `annobin`), symbol versions (`@GLIBC_`), the build image's own paths
 (`/opt/_internal/`) and object identifiers. A string is an object
-identifier when every version-like token in it has five or more
+identifier when every version-like token in it has six or more
 dot-separated parts, such as OpenSSL's
-`AES-256-CBC:AES256:2.16.840.1.101.3.4.1.42`. Release versions almost
-never have more than four (zlib 1.3.1.1), so a string that also holds a
-token of two to four parts, such as `ANSI X9.62`, is kept. One known
-exception is dropped: numpy's `OpenBLAS 0.3.34.106.0 …`. The noise list
-grows as the library report shows more.
+`AES-256-CBC:AES256:2.16.840.1.101.3.4.1.42`. Release versions can have
+five (numpy's `OpenBLAS 0.3.34.106.0 …`), and a noise rule that drops a
+real version hides it from matching too, so a string that also holds a
+token of two to five parts, such as `ANSI X9.62`, is kept, along with a
+few five-part spec references and OIDs. The noise list grows as the
+library report shows more.
 `strings` output and phase 04 keep everything; the filter applies where
 strings are used, in the library report (phase 05) and in matching.
 

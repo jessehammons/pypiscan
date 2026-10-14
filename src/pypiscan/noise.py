@@ -23,13 +23,15 @@ NOISE = [
 ]
 
 # Object identifiers, such as OpenSSL's 2.16.840.1.101.3.4.1.42: a string
-# whose every version-like token has five or more dot-separated parts.
-# Release versions almost never have more than four (zlib 1.3.1.1), so a
-# string that also holds a token of two to four parts is kept. One known
-# exception is dropped: numpy's OpenBLAS, "OpenBLAS 0.3.34.106.0 …". The
-# token is the one ``strings`` uses to list a string at all, as text.
+# whose every version-like token has six or more dot-separated parts.
+# Release versions can have five (numpy's "OpenBLAS 0.3.34.106.0 …"), and a
+# noise rule that drops a real version hides it from matching too, so only
+# tokens of six or more count as object identifiers. A string that also
+# holds a token of two to five parts is kept, and so are a few five-part
+# spec references and OIDs. The token is the one ``strings`` uses to list
+# a string at all, as text.
 TOKEN = re.compile(VERSION_TOKEN.pattern.decode("ascii"))
-OID_MIN_PARTS = 5
+OID_MIN_PARTS = 6
 
 
 def only_oids(text: str) -> bool:
