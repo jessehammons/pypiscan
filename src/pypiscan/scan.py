@@ -12,7 +12,7 @@ import json
 import re
 import signal
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TextIO, cast
@@ -34,6 +34,7 @@ from pypiscan.wheel_inspect import (
     WheelError,
     inspect_wheel,
 )
+from pypiscan.wheel_strings import strings_wheel
 
 SCHEMA_VERSION = 1
 EPISODE_SCHEMA_VERSION = 1
@@ -65,16 +66,20 @@ class Result:
 
 @dataclass(frozen=True)
 class Phase:
-    """A per-package phase: gets each package and its previous phase line."""
+    """A per-package phase.
+
+    ``run`` gets each package and its lines from every earlier phase, keyed
+    by phase name. It is only called when the previous phase's line is ok.
+    """
 
     name: str
-    run: Callable[[Package, Line | None], Result]
+    run: Callable[[Package, Mapping[str, Line]], Result]
 
 
 def resolve_phase(client: HttpClient) -> Phase:
     """Phase 01: the target wheel of each release, from PyPI's JSON API."""
 
-    def run(package: Package, previous: Line | None) -> Result:
+    def run(package: Package, earlier: Mapping[str, Line]) -> Result:
         data: Line = {"version": package.version}
         try:
             wheel = select_target(release_files(client, package.name, package.version))
@@ -95,9 +100,8 @@ def fetch_phase(client: HttpClient, cache_dir: Path) -> Phase:
     recorded as ``skipped`` with reason ``too_large`` and never downloaded.
     """
 
-    def run(package: Package, previous: Line | None) -> Result:
-        # The runner only calls phase 02 when phase 01's line is ok.
-        line = cast(Line, previous)
+    def run(package: Package, earlier: Mapping[str, Line]) -> Result:
+        line = earlier["01-resolve"]
         if cast(int, line["size"]) > WHEEL_SIZE_LIMIT:
             return Result("skipped", "too_large")
         wheel = WheelFile(
@@ -123,9 +127,8 @@ def inspect_phase() -> Phase:
     limit are listed in ``skipped_members`` instead of being read.
     """
 
-    def run(package: Package, previous: Line | None) -> Result:
-        line = cast(Line, previous)
-        wheel_path = Path(cast(str, line["path"]))
+    def run(package: Package, earlier: Mapping[str, Line]) -> Result:
+        wheel_path = Path(cast(str, earlier["02-fetch"]["path"]))
         skipped: list[SkippedMember] = []
         try:
             records = inspect_wheel(wheel_path, ZIP_MEMBER_SIZE_LIMIT, skipped)
@@ -144,8 +147,40 @@ def inspect_phase() -> Phase:
     return Phase("03-inspect", run)
 
 
+def strings_phase() -> Phase:
+    """Phase 04: ``strings`` records for each wheel's ELF members.
+
+    Reads the wheel's path from phase 02's line, and skips oversized zip
+    members as phase 03 does.
+    """
+
+    def run(package: Package, earlier: Mapping[str, Line]) -> Result:
+        wheel_path = Path(cast(str, earlier["02-fetch"]["path"]))
+        skipped: list[SkippedMember] = []
+        try:
+            records = strings_wheel(wheel_path, ZIP_MEMBER_SIZE_LIMIT, skipped)
+        except WheelError as exc:
+            return Result("error", str(exc))
+        return Result(
+            "ok",
+            None,
+            {
+                "wheel": wheel_path.name,
+                "records": cast(list[object], records),
+                "skipped_members": [asdict(member) for member in skipped],
+            },
+        )
+
+    return Phase("04-strings", run)
+
+
 def phases(client: HttpClient, cache_dir: Path) -> list[Phase]:
-    return [resolve_phase(client), fetch_phase(client, cache_dir), inspect_phase()]
+    return [
+        resolve_phase(client),
+        fetch_phase(client, cache_dir),
+        inspect_phase(),
+        strings_phase(),
+    ]
 
 
 def _sha256(path: Path) -> str:
@@ -259,17 +294,17 @@ def _read_lines(path: Path) -> dict[str, Line]:
     return {str(line["name"]): line for line in cast(list[Line], list(lines))}
 
 
-def _line(
-    phase: Phase, package: Package, previous: Line | None, earlier: list[str]
-) -> Line:
+def _line(phase: Phase, package: Package, earlier: dict[str, Line]) -> Line:
+    """Run ``phase`` for ``package``, or skip it if the previous line isn't ok."""
+    previous = next(reversed(earlier.values()), None)
     if previous is not None and previous["status"] != "ok":
         reason = previous["reason"]
         # Keep the phase where the package's line first wasn't ok.
         if previous["status"] != "skipped" or reason not in earlier:
-            reason = earlier[-1]
+            reason = next(reversed(earlier))
         result = Result("skipped", cast(str, reason))
     else:
-        result = phase.run(package, previous)
+        result = phase.run(package, earlier)
     return {
         "schema_version": SCHEMA_VERSION,
         "name": package.name,
@@ -287,8 +322,8 @@ def run_phases(
     err: TextIO,
 ) -> int:
     """Run each unfinished phase over every package; skip finished ones."""
-    previous: dict[str, Line] | None = None
-    earlier: list[str] = []
+    # Each package's lines from the finished phases, keyed by phase name.
+    earlier: dict[str, dict[str, Line]] = {package.name: {} for package in packages}
     for phase in phase_list:
         if stop.requested:
             print(f"interrupted before {phase.name}", file=err)
@@ -308,16 +343,15 @@ def run_phases(
                             file=err,
                         )
                         return EXIT_INTERRUPTED
-                    before = previous[package.name] if previous is not None else None
-                    line = _line(phase, package, before, earlier)
+                    line = _line(phase, package, earlier[package.name])
                     f.write(json.dumps(line) + "\n")
                     f.flush()
                     counts[line["status"]] += 1
             partial.replace(done)
             summary = ", ".join(f"{counts[status]} {status}" for status in STATUSES)
             print(f"{phase.name}: {summary}", file=err)
-        previous = _read_lines(done)
-        earlier.append(phase.name)
+        for name, line in _read_lines(done).items():
+            earlier[name][phase.name] = line
     if stop.requested:
         print("interrupted after the last phase finished", file=err)
         return EXIT_INTERRUPTED

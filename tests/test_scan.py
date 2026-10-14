@@ -1,11 +1,13 @@
 import io
 import json
 import signal
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
+from elf_builder import build_elf
 from pypiscan import scan as scan_module
 from pypiscan.cli import main
 from pypiscan.package_list import Package
@@ -23,6 +25,7 @@ from pypiscan.scan import (
     inspect_phase,
     run_phases,
     scan,
+    strings_phase,
 )
 from test_fetch import RecordedClient
 from test_inspect import LIBS_ELF, build_wheel
@@ -76,6 +79,7 @@ def test_scan_runs_every_phase(dirs: Dirs, capsys: pytest.CaptureFixture[str]) -
     assert "02-fetch: 1 ok, 2 skipped, 0 error" in err
     # The recorded wheel body isn't a real zip, so phase 03 reports it.
     assert "03-inspect: 0 ok, 2 skipped, 1 error" in err
+    assert "04-strings: 0 ok, 3 skipped, 0 error" in err
     demo, pure, missing = dirs.lines()
     assert demo["name"] == "demo"
     assert demo["status"] == "ok"
@@ -228,8 +232,8 @@ def test_gap_in_phase_files_names_files_to_delete(
 
 
 def phase(name: str, status: str = "ok", reason: str | None = None) -> Phase:
-    def go(package: Package, previous: Line | None) -> Result:
-        return Result(status, reason, {"seen": previous is not None})
+    def go(package: Package, earlier: Mapping[str, Line]) -> Result:
+        return Result(status, reason, {"seen": list(earlier)})
 
     return Phase(name, go)
 
@@ -264,13 +268,13 @@ def test_ok_lines_reach_the_next_phase(tmp_path: Path) -> None:
     phases = [phase("01-one"), phase("02-two")]
     assert run_phases(tmp_path, PACKAGES, phases, Stop(), io.StringIO()) == 0
     lines = (tmp_path / "02-two.jsonl").read_text().splitlines()
-    assert [json.loads(s)["seen"] for s in lines] == [True, True]
+    assert [json.loads(s)["seen"] for s in lines] == [["01-one"]] * 2
 
 
 def test_stop_between_packages(tmp_path: Path) -> None:
     stop = Stop()
 
-    def go(package: Package, previous: Line | None) -> Result:
+    def go(package: Package, earlier: Mapping[str, Line]) -> Result:
         stop.requested = True
         return Result("ok")
 
@@ -321,7 +325,7 @@ def test_phase_files_without_episode_json(
 def test_stop_between_phases_leaves_no_partial(tmp_path: Path) -> None:
     stop = Stop()
 
-    def go(package: Package, previous: Line | None) -> Result:
+    def go(package: Package, earlier: Mapping[str, Line]) -> Result:
         if package.name == PACKAGES[-1].name:
             stop.requested = True
         return Result("ok")
@@ -336,7 +340,7 @@ def test_stop_between_phases_leaves_no_partial(tmp_path: Path) -> None:
 def test_stop_during_the_last_phase_exits_130(tmp_path: Path) -> None:
     stop = Stop()
 
-    def go(package: Package, previous: Line | None) -> Result:
+    def go(package: Package, earlier: Mapping[str, Line]) -> Result:
         if package.name == PACKAGES[-1].name:
             stop.requested = True
         return Result("ok")
@@ -380,7 +384,7 @@ def test_phase_02_too_large_is_skipped_without_downloading(tmp_path: Path) -> No
     client = RecordedClient()
     phase = fetch_phase(client, tmp_path)
     previous = resolved_line(size=WHEEL_SIZE_LIMIT + 1)
-    result = phase.run(Package("foo", "1"), previous)
+    result = phase.run(Package("foo", "1"), {"01-resolve": previous})
     assert result == Result("skipped", "too_large")
     assert client.requested == []
     assert not (tmp_path / "wheels").exists()
@@ -392,7 +396,7 @@ def test_phase_02_at_the_limit_downloads(tmp_path: Path) -> None:
     # The limit itself isn't "over the limit"; the download attempt proceeds
     # and the recorded body's sha256 won't match, so phase 02 records an
     # error rather than a too_large skip.
-    result = phase.run(Package("foo", "1"), previous)
+    result = phase.run(Package("foo", "1"), {"01-resolve": previous})
     assert result.status == "error"
     assert "does not match" in (result.reason or "")
 
@@ -401,7 +405,7 @@ def test_phase_02_download_error(tmp_path: Path) -> None:
     client = RecordedClient({"https://files.example/foo.whl": b"wrong"})
     phase = fetch_phase(client, tmp_path)
     previous = resolved_line(size=5)
-    result = phase.run(Package("foo", "1"), previous)
+    result = phase.run(Package("foo", "1"), {"01-resolve": previous})
     assert result.status == "error"
     assert "does not match" in (result.reason or "")
 
@@ -418,8 +422,8 @@ def test_phase_02_is_skipped_when_phase_01_skipped(dirs: Dirs) -> None:
     assert demo["status"] == "ok"
 
 
-def inspect_previous(path: Path) -> Line:
-    return {"status": "ok", "path": str(path)}
+def inspect_previous(path: Path) -> dict[str, Line]:
+    return {"02-fetch": {"status": "ok", "path": str(path)}}
 
 
 def test_phase_03_inspects_wheel(tmp_path: Path) -> None:
@@ -479,13 +483,13 @@ def test_phase_03_is_skipped_when_phase_02_too_large(tmp_path: Path) -> None:
     # Drive a mini three-phase run through run_phases with hand-crafted
     # phases; phase 02 returns too_large and phase 03 must auto-skip with
     # reason "02-fetch" (not "too_large").
-    def phase_01(_: Package, _p: Line | None) -> Result:
+    def phase_01(_: Package, _e: Mapping[str, Line]) -> Result:
         return Result("ok", None, {"size": 1})
 
-    def phase_02(_: Package, _p: Line | None) -> Result:
+    def phase_02(_: Package, _e: Mapping[str, Line]) -> Result:
         return Result("skipped", "too_large")
 
-    def phase_03_fail(_: Package, _p: Line | None) -> Result:
+    def phase_03_fail(_: Package, _e: Mapping[str, Line]) -> Result:
         raise AssertionError("phase 03 ran despite too_large")
 
     phases = [
@@ -500,3 +504,77 @@ def test_phase_03_is_skipped_when_phase_02_too_large(tmp_path: Path) -> None:
     ]
     assert line["status"] == "skipped"
     assert line["reason"] == "02-fetch"
+
+
+def test_phases_get_every_earlier_line_and_skip_on_the_previous(
+    tmp_path: Path,
+) -> None:
+    seen: list[dict[str, object]] = []
+
+    def record(earlier: Mapping[str, Line]) -> Result:
+        seen.append({name: line["status"] for name, line in earlier.items()})
+        return Result("ok")
+
+    def three(package: Package, earlier: Mapping[str, Line]) -> Result:
+        record(earlier)
+        return Result("ok" if package.name == "a" else "error", "boom")
+
+    def four(package: Package, earlier: Mapping[str, Line]) -> Result:
+        return record(earlier)
+
+    first = [phase("01-one"), phase("02-two"), Phase("03-three", three)]
+    assert run_phases(tmp_path, PACKAGES, first, Stop(), io.StringIO()) == 0
+    # A later run with one more phase reads the finished phases from disk.
+    later = [*first, Phase("04-four", four)]
+    assert run_phases(tmp_path, PACKAGES, later, Stop(), io.StringIO()) == 0
+    ok = {"01-one": "ok", "02-two": "ok"}
+    assert seen == [ok, ok, ok | {"03-three": "ok"}]
+    lines = (tmp_path / "04-four.jsonl").read_text().splitlines()
+    assert [(json.loads(s)["status"], json.loads(s)["reason"]) for s in lines] == [
+        ("ok", None),
+        ("skipped", "03-three"),
+    ]
+
+
+def strings_earlier(path: Path) -> dict[str, Line]:
+    # Phase 03's line doesn't carry the wheel's path; phase 02's does.
+    ok: Line = {"status": "ok"}
+    return inspect_previous(path) | {"03-inspect": ok}
+
+
+def test_phase_04_lists_strings(tmp_path: Path) -> None:
+    banner = b"\0 deflate 1.3.2 Copyright 1995-2026 Jean-loup Gailly \0"
+    wheel = build_wheel(
+        tmp_path / "foo-1.0-cp312-cp312-manylinux_2_28_x86_64.whl",
+        {"foo/etree.so": build_elf(["libc.so.6"], rodata=banner)},
+    )
+    result = strings_phase().run(Package("foo", "1"), strings_earlier(wheel))
+    assert result.status == "ok"
+    assert result.data["wheel"] == wheel.name
+    assert result.data["skipped_members"] == []
+    [record] = cast(list[dict[str, Any]], result.data["records"])
+    assert record["path"] == "foo/etree.so"
+    [string] = record["strings"]
+    assert string["template"] == " deflate #.#.# Copyright #-# Jean-loup Gailly "
+    assert string["section"] == ".rodata"
+
+
+def test_phase_04_reports_bad_zip_as_error(tmp_path: Path) -> None:
+    bogus = tmp_path / "bogus.whl"
+    bogus.write_bytes(b"not a zip at all")
+    result = strings_phase().run(Package("x", "1"), strings_earlier(bogus))
+    assert result.status == "error"
+    assert "not a valid zip" in (result.reason or "")
+
+
+def test_phase_04_skips_oversized_zip_members(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wheel = build_wheel(tmp_path / "big.whl", {"big.libs/libbig.so": LIBS_ELF})
+    monkeypatch.setattr(scan_module, "ZIP_MEMBER_SIZE_LIMIT", 100)
+    result = strings_phase().run(Package("big", "1"), strings_earlier(wheel))
+    assert result.status == "ok"
+    assert result.data["records"] == []
+    assert result.data["skipped_members"] == [
+        {"path": "big.libs/libbig.so", "size": len(LIBS_ELF)}
+    ]
