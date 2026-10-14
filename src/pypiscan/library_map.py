@@ -3,7 +3,8 @@
 See README "The library map". The map is a CSV file with the columns in
 ``COLUMNS``, one row per prefix, library and way of identifying it. A
 ``skip`` row has every column empty except ``prefix`` and ``library``. A
-mapped row needs a repo. A row with a kind is a recognizer: its pattern
+mapped row needs a repo and tags, which ``tag_matcher`` compiles, and no
+identity in version 1. A row with a kind is a recognizer: its pattern
 compiles with ``matcher``, and a ``library_string`` or ``bare_version``
 row cites an ``identity_file``. A row with no kind marks a library that is
 identified but has no recognizer yet. ``cpe`` and ``osv`` may be empty
@@ -37,6 +38,8 @@ PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
 VERSION = r"\d[0-9A-Za-z.+~-]*"
 # Nothing around a bare version anchors it: three or more numbers.
 BARE_VERSION = r"\d+(?:\.\d+){2,}"
+# In tags, a version can also be spelled with "_" (REL_18_6).
+TAG_VERSION = r"\d[0-9A-Za-z._+~-]*"
 
 
 class LibraryMapError(Exception):
@@ -93,6 +96,17 @@ def matcher(pattern: str, kind: str) -> re.Pattern[str]:
     return re.compile(regex, re.DOTALL)
 
 
+def tag_matcher(tags: str) -> re.Pattern[str]:
+    """Compile a tags value for ``fullmatch``, with the version as group 1."""
+    parts = _split("tags", tags, {"version"})
+    return re.compile(f"{re.escape(parts[0])}({TAG_VERSION}){re.escape(parts[2])}")
+
+
+def tag_version(text: str) -> str:
+    """A version as a tag spells it, with "_" or "-" between digits as "."."""
+    return re.sub(r"(?<=\d)[_-](?=\d)", ".", text)
+
+
 def _row_problem(row: dict[str, str]) -> str | None:
     """Why ``row`` doesn't fit its kind, or ``None`` if it's valid."""
     missing = [name for name in ("prefix", "library") if not row[name]]
@@ -103,17 +117,19 @@ def _row_problem(row: dict[str, str]) -> str | None:
         if filled:
             return f"a skip row has only a prefix and library, but {filled[0]} is set"
         return None
-    if not row["repo"]:
-        return "repo is empty"
-    if row["tags"]:
-        # A typo here would make phase 06 match no tags and check nothing.
-        try:
-            _split("tags", row["tags"], {"version"})
-        except ValueError as exc:
-            return str(exc)
+    missing = [name for name in ("repo", "tags") if not row[name]]
+    if missing:
+        return f"{', '.join(missing)} is empty"
+    if row["identity"]:
+        return "identity is empty in version 1"
+    try:
+        # A typo here would make phase 06 match no tags.
+        _split("tags", row["tags"], {"version"})
+    except ValueError as exc:
+        return str(exc)
     kind = row["kind"]
     if not kind:
-        filled = [n for n in ("pattern", "identity_file", "identity") if row[n]]
+        filled = [n for n in ("pattern", "identity_file") if row[n]]
         if filled:
             return f"a row with no kind has no {', '.join(filled)}"
         return None
@@ -121,12 +137,10 @@ def _row_problem(row: dict[str, str]) -> str | None:
         return f"unknown kind {kind!r}; expected one of {', '.join(KINDS)}"
     if not row["pattern"]:
         return "pattern is empty"
-    if kind == "build_path" and (row["identity_file"] or row["identity"]):
-        return "a build_path row has no identity_file or identity"
+    if kind == "build_path" and row["identity_file"]:
+        return "a build_path row has no identity_file"
     if kind != "build_path" and not row["identity_file"]:
         return f"a {kind} row needs an identity_file"
-    if row["identity"] and not row["tags"]:
-        return "a row with an identity needs tags"
     try:
         matcher(row["pattern"], kind)
     except ValueError as exc:

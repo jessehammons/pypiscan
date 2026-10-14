@@ -9,11 +9,9 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-from dulwich.objects import Blob, Commit, ObjectID, Tag, Tree
-from dulwich.refs import Ref
-from dulwich.repo import Repo
 
 from elf_builder import build_elf
+from git_repo import make_repo
 from pypiscan.detectors import DETECTORS
 from pypiscan.fingerprint import Citation, fingerprint_binary
 
@@ -170,37 +168,6 @@ def script() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-def make_repo(path: Path, tags: dict[str, dict[str, str]]) -> Repo:
-    """One commit per tag, in order; annotated tags for names with '-'."""
-    repo = Repo.init(str(path), mkdir=True)
-    parent: list[ObjectID] = []
-    for n, (name, files) in enumerate(tags.items()):
-        tree = Tree()
-        for file, text in files.items():
-            blob = Blob.from_string(text.encode())
-            repo.object_store.add_object(blob)
-            tree.add(file.encode(), 0o100644, blob.id)
-        repo.object_store.add_object(tree)
-        commit = Commit()
-        commit.tree, commit.parents = tree.id, parent
-        commit.author = commit.committer = b"t <t@example.com>"
-        commit.commit_time = commit.author_time = 1_000_000 + n
-        commit.commit_timezone = commit.author_timezone = 0
-        commit.message = name.encode()
-        repo.object_store.add_object(commit)
-        parent = [commit.id]
-        target = commit.id
-        if "-" in name:
-            tag = Tag()
-            tag.name, tag.object = name.encode(), (Commit, commit.id)
-            tag.tagger, tag.tag_time, tag.tag_timezone = commit.author, 0, 0
-            tag.message = b"release"
-            repo.object_store.add_object(tag)
-            target = tag.id
-        repo.refs[Ref(b"refs/tags/" + name.encode())] = target
-    return repo
 
 
 ZUTIL = 'x;\nconst char PREFIX3(vstring)[] =\n    " zlib-ng " /* c */ "2.3.3";\n'

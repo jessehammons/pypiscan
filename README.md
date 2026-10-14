@@ -634,7 +634,7 @@ Later: a per-wheel time limit, which needs a subprocess per wheel.
 
 Adding a library means adding rows to the library map, not code.
 
-- **4.1** Phase 06, upstream clones and tags. Clones or fetches every
+- **4.1** ✓ Phase 06, upstream clones and tags. Clones or fetches every
   library the map names, and lists the release tags its **tags** matches,
   each with its version; a library whose **tags** matches no tag is an
   `error` line. The loader requires **tags** on every mapped row and
@@ -646,10 +646,10 @@ Adding a library means adding rows to the library map, not code.
   module, so dulwich leaves the dependencies. Tests use a small synthetic
   git repository. This item adds the convention's test guard and its ruff
   exception, the one the maintainer has approved; the PR still calls the
-  exception out. **← current**
+  exception out.
 - **4.2** Phase 07, recognizers built from the library map's patterns:
   one line per library listing them, or `skipped` with reason
-  `no_recognizer`.
+  `no_recognizer`. **← current**
 - **4.3** Phase 08, fingerprint with the recognizers and the noise filter.
   Adds `basis` to fingerprint records and bumps their `schema_version`.
   Manual check: compare results against Pillow 12.3.0's

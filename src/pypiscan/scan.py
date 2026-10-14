@@ -1,9 +1,9 @@
 """Run a package list through the scan's phases, one finished phase at a time.
 
 See README "How a scan runs". Each phase writes ``NN-<phase>.jsonl.partial``
-with one line per package and renames it when every package is done, so an
-episode directory only ever holds whole phase files plus at most one
-``.partial`` left by an interrupted run.
+with one line per package, or from phase 06 on per library, and renames it
+when every one is done, so an episode directory only ever holds whole phase
+files plus at most one ``.partial`` left by an interrupted run.
 """
 
 import hashlib
@@ -15,10 +15,18 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TextIO, cast
+from typing import Protocol, TextIO, cast
 
 from pypiscan.fetch import download
-from pypiscan.library_map import LibraryMapError, MapRow, load_library_map
+from pypiscan.git import GitError, clone_or_fetch, tags
+from pypiscan.library_map import (
+    SKIP,
+    LibraryMapError,
+    MapRow,
+    load_library_map,
+    tag_matcher,
+    tag_version,
+)
 from pypiscan.library_report import libraries, report, todo, write_todo
 from pypiscan.package_list import Package, PackageListError, load_package_list
 from pypiscan.pypi import (
@@ -57,7 +65,7 @@ Lines = Mapping[str, Mapping[str, Line]]
 
 @dataclass
 class Stop:
-    """Set by the SIGINT handler; the runner checks it between packages."""
+    """Set by the SIGINT handler; the runner checks it between items."""
 
     requested: bool = False
 
@@ -69,22 +77,36 @@ class Result:
     data: Line = field(default_factory=Line)
 
 
-@dataclass(frozen=True)
-class Phase:
-    """A per-package phase.
+class Named(Protocol):
+    @property
+    def name(self) -> str: ...
 
-    ``run`` gets each package and its lines from every earlier phase, keyed
-    by phase name. It is only called when the previous phase's line is ok.
-    ``finish``, if set, gets every package's lines, this phase's included,
-    once every package is done and before the phase file is finished.
+
+@dataclass(frozen=True)
+class Library:
+    """A library the map names, the item of the per-library phases."""
+
+    name: str
+    repo: str
+    tags: str
+
+
+@dataclass(frozen=True)
+class Phase[T: Named]:
+    """A per-package or per-library phase.
+
+    ``run`` gets each item and its lines from every earlier phase of its
+    kind, keyed by phase name. It is only called when the previous phase's
+    line is ok. ``finish``, if set, gets every item's lines, this phase's
+    included, once every item is done and before the phase file is finished.
     """
 
     name: str
-    run: Callable[[Package, Mapping[str, Line]], Result]
+    run: Callable[[T, Mapping[str, Line]], Result]
     finish: Callable[[Sequence[str], Lines], None] | None = None
 
 
-def resolve_phase(client: HttpClient) -> Phase:
+def resolve_phase(client: HttpClient) -> Phase[Package]:
     """Phase 01: the target wheel of each release, from PyPI's JSON API."""
 
     def run(package: Package, earlier: Mapping[str, Line]) -> Result:
@@ -100,7 +122,7 @@ def resolve_phase(client: HttpClient) -> Phase:
     return Phase("01-resolve", run)
 
 
-def fetch_phase(client: HttpClient, cache_dir: Path) -> Phase:
+def fetch_phase(client: HttpClient, cache_dir: Path) -> Phase[Package]:
     """Phase 02: download each wheel into the cache, verifying its sha256.
 
     Builds the ``WheelFile`` from phase 01's line instead of calling PyPI
@@ -128,7 +150,7 @@ def fetch_phase(client: HttpClient, cache_dir: Path) -> Phase:
     return Phase("02-fetch", run)
 
 
-def inspect_phase() -> Phase:
+def inspect_phase() -> Phase[Package]:
     """Phase 03: ``inspect`` records for each wheel's ELF members.
 
     Zip members whose declared uncompressed size is over the zip-member
@@ -155,7 +177,7 @@ def inspect_phase() -> Phase:
     return Phase("03-inspect", run)
 
 
-def strings_phase() -> Phase:
+def strings_phase() -> Phase[Package]:
     """Phase 04: ``strings`` records for each wheel's ELF members.
 
     Reads the wheel's path from phase 02's line, and skips oversized zip
@@ -182,7 +204,7 @@ def strings_phase() -> Phase:
     return Phase("04-strings", run)
 
 
-def libraries_phase(episode: Path) -> Phase:
+def libraries_phase(episode: Path) -> Phase[Package]:
     """Phase 05: each `.libs/` shared library in phase 03's records, with its
     prefix. When every package is done, writes ``library-report.md``.
     """
@@ -198,7 +220,7 @@ def libraries_phase(episode: Path) -> Phase:
     return Phase("05-libraries", run, finish)
 
 
-def phases(client: HttpClient, cache_dir: Path, episode: Path) -> list[Phase]:
+def phases(client: HttpClient, cache_dir: Path, episode: Path) -> list[Phase[Package]]:
     return [
         resolve_phase(client),
         fetch_phase(client, cache_dir),
@@ -206,6 +228,60 @@ def phases(client: HttpClient, cache_dir: Path, episode: Path) -> list[Phase]:
         strings_phase(),
         libraries_phase(episode),
     ]
+
+
+def upstream_libraries(rows: Sequence[MapRow]) -> list[Library]:
+    """Each library the map names, in order of first appearance."""
+    found: dict[str, Library] = {}
+    for row in rows:
+        if row.library != SKIP:
+            found.setdefault(row.library, Library(row.library, row.repo, row.tags))
+    return list(found.values())
+
+
+def upstream_phase(cache_dir: Path, episode: Path, map_sha256: str) -> Phase[Library]:
+    """Phase 06: clone or fetch each library, and list the tags its tags matches.
+
+    When every library is done, records the map's sha256 in episode.json for
+    pre-flight check 5.
+    """
+
+    def run(library: Library, earlier: Mapping[str, Line]) -> Result:
+        data: Line = {"repo": library.repo}
+        directory = cache_dir / "upstream" / f"{library.name}.git"
+        directory.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            clone_or_fetch(library.repo, directory)
+            names = tags(directory)
+        except GitError as exc:
+            return Result("error", str(exc), data)
+        matcher = tag_matcher(library.tags)
+        found = [
+            {"tag": name, "version": tag_version(match[1])}
+            for name in names
+            if (match := matcher.fullmatch(name))
+        ]
+        if not found:
+            return Result(
+                "error",
+                f"tags {library.tags!r} matches none of the {len(names)} tags",
+                data,
+            )
+        return Result("ok", None, data | {"tags": cast(list[object], found)})
+
+    def finish(names: Sequence[str], lines: Lines) -> None:
+        record = episode / "episode.json"
+        recorded = json.loads(record.read_text(encoding="utf-8"))
+        recorded["library_map_sha256"] = map_sha256
+        record.write_text(json.dumps(recorded, indent=2) + "\n", encoding="utf-8")
+
+    return Phase("06-upstream", run, finish)
+
+
+def library_phases(
+    cache_dir: Path, episode: Path, map_sha256: str
+) -> list[Phase[Library]]:
+    return [upstream_phase(cache_dir, episode, map_sha256)]
 
 
 def _sha256(path: Path) -> str:
@@ -292,10 +368,32 @@ def _episode_problems(episode: Path, inputs: Line) -> list[str]:
     ]
 
 
+def _map_problems(episode: Path, library_map: Path) -> list[str]:
+    """Check 5: the map hasn't changed since phase 06 recorded its sha256."""
+    if not (episode / "06-upstream.jsonl").is_file():
+        return []
+    try:
+        recorded = json.loads((episode / "episode.json").read_text("utf-8"))
+        changed = recorded["library_map_sha256"] != _sha256(library_map)
+    except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError):
+        changed = True
+    if not changed:
+        return []
+    later = sorted(
+        path.name
+        for path in episode.iterdir()
+        if (match := PHASE_FILE.fullmatch(path.name)) and int(match[1]) >= 6
+    )
+    return [
+        f"the library map has changed since phase 06 ran. Delete "
+        f"{', '.join(later)} to rerun phase 06 and every later phase."
+    ]
+
+
 def preflight(
     package_list: Path, library_map: Path, episode: Path, cache: Path, count: int
 ) -> tuple[list[Package], list[MapRow], int, list[str]]:
-    """Checks 1 to 4. Returns the packages, map rows, clamped count and problems."""
+    """Checks 1 to 5. Returns the packages, map rows, clamped count and problems."""
     problems: list[str] = []
     for label, directory in (("episode", episode), ("cache", cache)):
         root = git_work_tree(directory)
@@ -307,6 +405,7 @@ def preflight(
     rows: list[MapRow] = []
     try:
         rows = load_library_map(library_map)
+        problems += _map_problems(episode, library_map)
     except LibraryMapError as exc:
         problems.append(str(exc))
     try:
@@ -319,13 +418,15 @@ def preflight(
     return packages[:count], rows, count, problems
 
 
-def _read_lines(path: Path) -> dict[str, Line]:
+def _read_lines(path: Path, key: str = "name") -> dict[str, Line]:
     lines = (json.loads(text) for text in path.read_text("utf-8").splitlines())
-    return {str(line["name"]): line for line in cast(list[Line], list(lines))}
+    return {str(line[key]): line for line in cast(list[Line], list(lines))}
 
 
-def _line(phase: Phase, package: Package, earlier: dict[str, Line]) -> Line:
-    """Run ``phase`` for ``package``, or skip it if the previous line isn't ok."""
+def _line[T: Named](
+    phase: Phase[T], item: T, earlier: dict[str, Line], key: str
+) -> Line:
+    """Run ``phase`` for ``item``, or skip it if the previous line isn't ok."""
     previous = next(reversed(earlier.values()), None)
     if previous is not None and previous["status"] != "ok":
         reason = previous["reason"]
@@ -334,26 +435,31 @@ def _line(phase: Phase, package: Package, earlier: dict[str, Line]) -> Line:
             reason = next(reversed(earlier))
         result = Result("skipped", cast(str, reason))
     else:
-        result = phase.run(package, earlier)
+        result = phase.run(item, earlier)
     return {
         "schema_version": SCHEMA_VERSION,
-        "name": package.name,
+        key: item.name,
         "status": result.status,
         "reason": result.reason,
         **result.data,
     }
 
 
-def run_phases(
+def run_phases[T: Named](
     episode: Path,
-    packages: Sequence[Package],
-    phase_list: Sequence[Phase],
+    items: Sequence[T],
+    phase_list: Sequence[Phase[T]],
     stop: Stop,
     err: TextIO,
+    key: str = "name",
 ) -> int:
-    """Run each unfinished phase over every package; skip finished ones."""
-    # Each package's lines from the finished phases, keyed by phase name.
-    earlier: dict[str, dict[str, Line]] = {package.name: {} for package in packages}
+    """Run each unfinished phase over every item; skip finished ones.
+
+    ``key`` names the item in each line: ``name`` for a package, ``library``
+    for a library.
+    """
+    # Each item's lines from the finished phases, keyed by phase name.
+    earlier: dict[str, dict[str, Line]] = {item.name: {} for item in items}
     for phase in phase_list:
         if stop.requested:
             print(f"interrupted before {phase.name}", file=err)
@@ -366,7 +472,7 @@ def run_phases(
             counts: Counter[object] = Counter()
             current: dict[str, Line] = {}
             with partial.open("x", encoding="utf-8") as f:
-                for package in packages:
+                for item in items:
                     if stop.requested:
                         print(
                             f"{phase.name}: interrupted; {partial.name} is left "
@@ -374,13 +480,13 @@ def run_phases(
                             file=err,
                         )
                         return EXIT_INTERRUPTED
-                    line = _line(phase, package, earlier[package.name])
+                    line = _line(phase, item, earlier[item.name], key)
                     f.write(json.dumps(line) + "\n")
                     f.flush()
                     counts[line["status"]] += 1
-                    current[package.name] = line
+                    current[item.name] = line
             if phase.finish is not None:
-                names = [package.name for package in packages]
+                names = [item.name for item in items]
                 phase.finish(
                     names,
                     {n: earlier[n] | {phase.name: current[n]} for n in names},
@@ -388,7 +494,7 @@ def run_phases(
             partial.replace(done)
             summary = ", ".join(f"{counts[status]} {status}" for status in STATUSES)
             print(f"{phase.name}: {summary}", file=err)
-        for name, line in _read_lines(done).items():
+        for name, line in _read_lines(done, key).items():
             earlier[name][phase.name] = line
     if stop.requested:
         print("interrupted after the last phase finished", file=err)
@@ -457,9 +563,14 @@ def scan(
 
     handler = signal.signal(signal.SIGINT, on_sigint)
     try:
-        status = run_phases(
-            episode, packages, phases(client, cache, episode), stop, err
-        )
-        return status or manual_step(episode, rows, err)
+        part_1 = phases(client, cache, episode)
+        status = run_phases(episode, packages, part_1, stop, err)
+        # The manual step comes between phases 05 and 06.
+        status = status or manual_step(episode, rows, err)
+        if status:
+            return status
+        part_2 = library_phases(cache, episode, _sha256(library_map))
+        libraries = upstream_libraries(rows)
+        return run_phases(episode, libraries, part_2, stop, err, key="library")
     finally:
         signal.signal(signal.SIGINT, handler)
