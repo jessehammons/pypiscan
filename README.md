@@ -72,6 +72,11 @@ it can be reached. Every finding records the level of evidence behind it:
 Reports to maintainers state the level plainly. Findings judged unreachable
 are not sent as security reports.
 
+Each finding also carries the basis of the version it rests on (see
+[How versions are identified](#how-versions-are-identified)). Identification
+is best effort, so before anything is sent to a maintainer, the bundled
+library and its version are confirmed by hand, whatever the basis.
+
 ## Sources of truth
 
 - **The wheel's binaries** are what users actually run, and the primary
@@ -90,14 +95,28 @@ are not sent as security reports.
 
 ## How versions are identified
 
-A version number found in a binary means different things depending on where
-the string comes from. Detectors record every match as one of three kinds of
-evidence:
+Identification is best effort. Any string that can say which library a
+binary holds, and which version, is used, and every result records the kind
+of evidence it rests on. That way a wrong answer can be traced to its cause,
+weaker results can be confirmed by hand, and aggregate statistics can say
+which kinds they include. A version number means different things depending
+on where it comes from, so each match is recorded as one of five kinds,
+strongest first:
 
 - **Library string**: a string defined in one of the upstream library's own
-  source files, such as zlib's `deflate` and `inflate` copyright banners.
-  Only this kind shows that a binary contains the library, and only this
-  kind sets its version.
+  source files that names the library and its version, such as zlib's
+  `deflate` and `inflate` copyright banners or `libpng version 1.6.58`.
+- **Build path**: a source path left in the binary by the library's build,
+  usually through `assert` or `__FILE__`, whose directory names the library
+  and its version, such as
+  `/project/build/openjpeg-2.5.4/src/lib/openjp2/t1.c`. It shows which
+  release's source was built.
+- **Bare version**: a string that is only a version, such as `2.5.4`,
+  defined in the library's own source, typically what its version function
+  returns. It counts only in a `.libs/` file whose prefix the library map
+  ties to that library, since such a file holds one library; anywhere else
+  a bare version is ignored. When the prefix maps to several libraries, a
+  bare version doesn't choose between them.
 - **Header string**: a version macro from the library's public header, such
   as `ZLIB_VERSION`. Code that *calls* a library embeds it; for example,
   zlib's `deflateInit()` passes `ZLIB_VERSION` to the library. It shows
@@ -105,50 +124,70 @@ evidence:
   contains the library.
 - **Filename**: the version suffix on a wheel member's name, such as
   `libz-….so.1.3.1`. It isn't part of the binary's contents, and for some
-  libraries (libtiff, libwebp) it's an ABI number rather than a release. It
-  is recorded as corroboration only: it never sets a version and never
-  produces a record on its own.
+  libraries (libtiff, libwebp) it's an ABI number rather than a release.
+
+The first three kinds show that a binary contains the library, and the
+strongest kind present sets its version. A header string alone gives
+`compiled_against`. A filename is corroboration only: it never sets a
+version and never produces a record on its own.
 
 Exported symbols and `DT_SONAME` are not version evidence.
 
-Rules for detectors:
+Strings that can't identify a library are dropped before they are used.
+Only strings in data sections (`.rodata`, `.data` and `.data.rel.ro`)
+count, and known noise is removed: compiler and build notes (`GCC:`,
+`annobin`), symbol versions (`@GLIBC_`) and the build image's own paths
+(`/opt/_internal/`). The noise list grows as the library report shows more.
+`strings` output and phase 04 keep everything; the filter applies where
+strings are used, in the library report (phase 05) and in matching.
 
-- Patterns match whole strings, such as a full banner, and capture the
-  version from inside them. A pattern for a bare version number also matches
-  header strings and unrelated data.
+Rules for recognizers:
+
+- Library-string and build-path patterns match whole strings and capture the
+  version from inside them, so `Since libtiff 4.5.1, …` in a libtiff 4.7.1
+  binary is never read as its version. A bare-version pattern matches a
+  whole string that is only a version.
 - Candidate patterns come from discovery across real wheels (roadmap 3.5
   and 3.7): version-like strings grouped by the text around them, and the
-  library map's identity strings. Upstream
-  source then confirms each candidate: which file defines it, and whether
-  it is a library string or a header string.
-- Each pattern cites the upstream source file that defines its string, at a
-  release tag. Patterns come from reading upstream source, not from memory.
-- Each pattern is tested against its string at *every* upstream release tag,
-  from a committed fixture generated from the upstream repository (roadmap
-  2.2; from 4.1 on, by `scan`'s phase 06). Reading one release isn't enough:
-  before 2.1.0, zlib-ng named and worded its identity string differently, and
-  a pattern written from 2.3.3 alone missed it.
+  library map's identity rows. Upstream source then confirms each library
+  string and bare version: which file defines it, and whether it is the
+  library's own string or a header string.
+- Library-string and bare-version patterns cite the upstream source file
+  that defines their string, at a release tag, and come from reading
+  upstream source, not from memory. Each is tested against its string at
+  *every* upstream release tag, from a committed fixture generated from the
+  upstream repository (roadmap 2.2; from 4.1 on, by `scan`'s phase 06).
+  Reading one release isn't enough: before 2.1.0, zlib-ng named and worded
+  its identity string differently, and a pattern written from 2.3.3 alone
+  missed it.
+- Build paths come from the build, not from upstream source, so a
+  build-path pattern cites a wheel and member where the path was seen, and
+  it can't be tested against upstream tags.
 - Versions are kept exactly as the string gives them, including four-part
   versions such as zlib 1.3.1.1.
 - Some libraries have derivatives that carry their strings (zlib-ng for
   zlib; BoringSSL, LibreSSL and AWS-LC for OpenSSL). A binary is reported as
   the original only if it has the original's library strings and none of a
   derivative's. A derivative is reported with its own version, not the
-  version it claims compatibility with. If upstream source offers no library
-  string that tells them apart, stop and ask the maintainer.
+  version it claims compatibility with. Only library strings can tell the
+  two apart; if upstream source offers none that does, stop and ask the
+  maintainer.
 
 `fingerprint` writes JSON Lines with its own `schema_version`, one record
 per binary, library and relation:
 
 - `wheel`, `path`, `sha256`: as in `inspect`.
 - `library`: such as `zlib` or `zlib-ng`.
-- `relation`: `contains` when library strings matched; `compiled_against`
-  when only header strings did.
-- `version`: from library strings for `contains`; the header string
-  verbatim for `compiled_against`; `null` when library strings in one binary
-  disagree.
-- `conflict`: `true` when library strings in one binary give different
-  versions.
+- `relation`: `contains` when a library string, build path or bare version
+  matched; `compiled_against` when only header strings did.
+- `basis`: the kind that set the version (`library_string`, `build_path` or
+  `bare_version`), or `header_string` for `compiled_against`.
+- `version`: from the strongest kind present for `contains`; the header
+  string verbatim for `compiled_against`; `null` when matches of that
+  strongest kind disagree.
+- `conflict`: `true` when any two matches that can set a version give
+  different versions, even when a stronger kind settled it. Such records
+  are checked by hand.
 - `evidence`: every match, with its kind, the matched text, its file offset
   and its ELF section name (offset and section are `null` for filename
   evidence, and the section is `null` when it can't be mapped).
@@ -218,8 +257,12 @@ Part 1:
    `.libs/` directory, with its prefix: the filename without auditwheel's
    hash and version suffix (`libjpeg-1a2b3c4d.so.62.4.0` becomes
    `libjpeg`). Then the phase writes the library report into the episode:
-   for each prefix, how many wheels and files carry it and its most
-   common `strings` templates.
+   for each prefix, how many wheels and files carry it, and its `strings`
+   templates ranked by how many wheels carry each one. The report uses
+   only strings that pass the noise filter (see
+   [How versions are identified](#how-versions-are-identified)), and cuts
+   templates longer than 200 characters to 200, so a long run of text
+   doesn't become a template of its own.
 
 **Manual step.** Once phase 05 is finished, in this run or an earlier one,
 every run compares phase 05's prefixes with the current library map and
@@ -234,14 +277,18 @@ Part 2:
 
 6. `06-upstream` (network, per library): clone the library's repository
    into the cache, or fetch into the existing clone (see
-   [Conventions](#conventions)), and at every release tag read each
-   identity string the map names, as a C literal. A string assembled from
-   macros is an `error` line for that library until a preprocessor step is
-   added.
-7. `07-recognizers` (per library): build a recognizer from phase 06's
-   strings and check that it reports every tag's library and version
-   (see [How versions are identified](#how-versions-are-identified)). A
-   library with any tag misidentified gets an `error` line and isn't used.
+   [Conventions](#conventions)), and at every release tag read the string
+   each `library_string` and `bare_version` row names, as a C literal. A
+   string assembled from macros is an `error` line for that library until
+   a preprocessor step is added. `build_path` rows have nothing to read
+   upstream, but the clone is still needed for fixed versions (phase 09).
+7. `07-recognizers` (per library): build a recognizer for each of the
+   library's map rows (see
+   [How versions are identified](#how-versions-are-identified)), and check
+   the `library_string` and `bare_version` ones against phase 06's strings
+   at every tag. A library with any tag misidentified gets an `error` line
+   and isn't used. A `build_path` recognizer has no upstream string to
+   check against, and the line marks it unchecked.
 8. `08-fingerprint` (per package): run the recognizers on each shared
    library whose prefix maps to them, giving `fingerprint` records.
 9. `09-cves` (network, per library): candidate CVEs from NVD, by the map's
@@ -255,14 +302,15 @@ Part 2:
 ### The library map
 
 `data/libraries.csv` is curated input, edited by hand and committed like
-the package list. One row per prefix, library and identity string:
+the package list. One row per prefix, library and way of identifying it:
 
-| prefix | library | repo | identity_file | identity_symbol | cpe | osv |
-|---|---|---|---|---|---|---|
-| `libz` | `zlib` | `https://github.com/madler/zlib` | `deflate.c` | `deflate_copyright` | `zlib:zlib` | … |
-| `libz` | `zlib` | `https://github.com/madler/zlib` | `inftrees.c` | `inflate_copyright` | `zlib:zlib` | … |
-| `libz` | `zlib-ng` | … | … | … | `zlib-ng:zlib-ng` | … |
-| `libgfortran` | `skip` | | | | | |
+| prefix | library | kind | repo | identity_file | identity | cpe | osv |
+|---|---|---|---|---|---|---|---|
+| `libz` | `zlib` | `library_string` | `https://github.com/madler/zlib` | `deflate.c` | `deflate_copyright` | `zlib:zlib` | … |
+| `libz` | `zlib` | `library_string` | `https://github.com/madler/zlib` | `inftrees.c` | `inflate_copyright` | `zlib:zlib` | … |
+| `libz` | `zlib-ng` | `library_string` | … | … | … | `zlib-ng:zlib-ng` | … |
+| `libopenjp2` | `openjpeg` | `build_path` | `https://github.com/uclouvain/openjpeg` | | `openjpeg-` | `uclouvain:openjpeg` | … |
+| `libgfortran` | `skip` | | | | | | |
 
 - **prefix** is how a file is found, **library** is what it turns out to
   be, and **cpe** and **osv** are how advisories name it. The three
@@ -271,9 +319,19 @@ the package list. One row per prefix, library and identity string:
 - A prefix can map to several libraries (`libz` may be zlib or zlib-ng in
   compat mode). The prefix picks which recognizers to try; the strings in
   the file decide which one it is.
-- A library can have several identity strings, one row each. Each must be
-  a library string, not a header string: choosing it means reading
-  upstream source, and that is what the manual step is for.
+- **kind** is one of the version-setting kinds in
+  [How versions are identified](#how-versions-are-identified):
+  - For `library_string` and `bare_version`, **identity_file** and
+    **identity** name the upstream source file and the C variable or macro
+    that defines the string. It must be the library's own string, never a
+    header string; choosing it means reading upstream source, and that is
+    what the manual step is for.
+  - For `build_path`, **identity_file** is empty, and **identity** is the
+    directory name that comes before the version in the build path, such as
+    `openjpeg-`.
+- A library can have several rows, one per way of identifying it. Prefer a
+  library string; use a build path or a bare version for a library that
+  embeds no library string.
 - `skip` marks a prefix the maintainer has looked at and isn't tracking,
   so it doesn't come back as a TODO.
 - A map with only its header row is valid: part 1's first run starts from
@@ -485,10 +543,13 @@ uv run python -m pypiscan scan data/smoke.csv \
 - **3.7** Phase 05, `--library-map`, the library map's format and loader
   (pre-flight check 2), the library report, `library-map-todo.csv` and the
   stop for the manual step. The loader accepts a map with only its header
-  row, and rejects missing fields, unknown columns and a prefix that is both
-  `skip` and mapped. Manual check: a full run of `data/packages.csv` with
-  `--count 100`; the PR includes the library report's prefixes, ordered by
-  how many wheels carry them.
+  row, and rejects missing fields, unknown columns, an unknown kind, a row
+  whose fields don't fit its kind (a `build_path` row with an
+  `identity_file`, or another kind without one) and a prefix that is both
+  `skip` and mapped. The report applies the noise filter and the
+  200-character template cut. Manual check: a full run of
+  `data/packages.csv` with `--count 100`; the PR includes the library
+  report's prefixes, ordered by how many wheels carry them.
 - **3.8** *(maintainer input)* The first library map: rows for the prefixes
   in 3.7's report, most frequent first, chosen by the maintainer.
 
@@ -508,14 +569,20 @@ Adding a library means adding rows to the library map, not code.
   [Conventions](#conventions). This item adds that convention's test
   guard and its ruff exception, the one the maintainer has approved; the
   PR still calls the exception out.
-- **4.2** Phase 07, recognizers built from phase 06's strings and checked at
-  every tag. The hand-written zlib detector (2.1) is replaced once the
-  generated recognizers pass its fixtures, including telling zlib from
-  zlib-ng.
-- **4.3** Phase 08, fingerprint with the recognizers. Manual check: compare
-  results against Pillow 12.3.0's `.github/dependencies.json`.
-- **4.4** *(maintainer input)* libwebp: it embeds no plain version string, so
-  choose a detection method before implementing it.
+- **4.2** Phase 07, recognizers built from the library map's rows, of every
+  kind, with `library_string` and `bare_version` recognizers checked against
+  phase 06's strings at every tag. The hand-written zlib detector (2.1) is
+  replaced once the generated recognizers pass its fixtures, including
+  telling zlib from zlib-ng. Tests include libtiff's deprecation message
+  (`Since libtiff 4.5.1, …`), which a 4.7.1 binary carries and which must
+  never set its version.
+- **4.3** Phase 08, fingerprint with the recognizers and the noise filter.
+  Adds `basis` to fingerprint records and bumps their `schema_version`.
+  Manual check: compare results against Pillow 12.3.0's
+  `.github/dependencies.json`.
+- **4.4** *(maintainer input)* Libraries with no version string of any kind,
+  such as libwebp and freetype: choose a detection method for each before
+  implementing it.
 - **4.5** Report shared libraries no recognizer identified, so gaps are
   visible.
 
@@ -585,6 +652,8 @@ Adding a library means adding rows to the library map, not code.
 - Published results name only cases that are already resolved. Aggregate
   statistics include unresolved cases without naming them, so reported patch
   times aren't biased toward the fast cases.
+- Aggregate statistics say which identification bases they include, such
+  as library strings only, or all kinds.
 
 ## Conventions
 
