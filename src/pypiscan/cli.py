@@ -4,12 +4,10 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from packaging.utils import InvalidName, canonicalize_name
-from packaging.version import InvalidVersion, Version
-
 from pypiscan.detectors import DETECTORS
 from pypiscan.fetch import fetch_release
 from pypiscan.fingerprint import fingerprint_wheel
+from pypiscan.package_list import check_release
 from pypiscan.pypi import HttpClient, PyPIError, UrllibClient
 from pypiscan.wheel_inspect import WheelError, inspect_wheel
 
@@ -41,9 +39,8 @@ def fetch(release: tuple[str, str], cache_dir: Path, client: HttpClient) -> int:
 def _release(spec: str) -> tuple[str, str]:
     name, sep, version = spec.partition("==")
     try:
-        canonicalize_name(name, validate=True)
-        Version(version)
-    except (InvalidName, InvalidVersion):
+        check_release(name, version)
+    except ValueError:
         sep = ""
     if not sep:
         raise argparse.ArgumentTypeError(f"expected <name>==<version>, got {spec!r}")
