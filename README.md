@@ -432,7 +432,7 @@ uv run python -m pypiscan scan data/smoke.csv \
   sha256. Tests use recorded responses. Manual check: for five packages, the
   chosen file matches what `uvx pip download` picks with the flags in
   [Conventions](#conventions).
-- **3.2** The package list format and loader, and the smoke list. A package
+- **3.2** ✓ The package list format and loader, and the smoke list. A package
   list is a CSV file with columns `name` and `version`, at most 100 rows, in
   processing order. The loader rejects an empty list, more than 100 rows,
   missing fields, and names that collide after PEP 503 normalization
@@ -444,7 +444,7 @@ uv run python -m pypiscan scan data/smoke.csv \
   whose target wheel is over the wheel size limit (`too_large`). Each row
   pins the package's latest final release when the list is written.
   `data/README.md` says why each row is there. Manual check: every row's
-  release exists on PyPI. **← current**
+  release exists on PyPI.
 - **3.3** `scan`'s first runnable version: the command-line rules,
   pre-flight checks 1 to 4 without the library map, `episode.json`, and
   the phase runner
@@ -454,6 +454,7 @@ uv run python -m pypiscan scan data/smoke.csv \
   3.4, so episodes from smoke runs stay usable as phases are added. Manual
   check: a smoke run with `--count 4`, its `01-resolve.jsonl`, and a
   second run of the same command that skips phase 01 and exits 0.
+  **← current**
 - **3.4** Phases 02 and 03. Phase 02 reuses 3.1's download and skips
   wheels over the wheel size limit as `too_large`. In phase 03, a bad zip or
   malformed ELF becomes an `error` line, and zip members over the
