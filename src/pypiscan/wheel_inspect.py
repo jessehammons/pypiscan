@@ -3,6 +3,7 @@
 import hashlib
 import io
 import zipfile
+import zlib
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -97,7 +98,11 @@ def iter_elf_members(
                         continue
                     data = ELF_MAGIC + f.read()
                 yield info.filename, data
-    except zipfile.BadZipFile as exc:
+    except (zipfile.BadZipFile, zlib.error, EOFError) as exc:
+        # zlib.error is raised when a deflated member's compressed bytes are
+        # garbled; EOFError when a compressed stream ends early. Neither is
+        # a BadZipFile, but to the caller they mean the same thing: this
+        # wheel's zip can't be read as data.
         raise WheelError(f"{wheel}: not a valid zip file ({exc})") from exc
     except OSError as exc:
         raise WheelError(f"{wheel}: {exc}") from exc
