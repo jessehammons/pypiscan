@@ -186,9 +186,9 @@ Rules for recognizers:
   `VERSION.dat`, libjpeg-turbo's from `CMakeLists.txt`) or assembled from
   macros, so a release tag doesn't hold the final string. Where it does, as
   one C literal that a variable or macro names (zlib's `deflate_copyright`,
-  bzip2's `BZ_VERSION`), the row names it in **identity**, and the pattern
-  is also checked against that literal at every release tag (phases 06 and
-  07). Reading one release isn't enough: before 2.1.0, zlib-ng named and
+  bzip2's `BZ_VERSION`), the row can name it in **identity**, and the
+  pattern is then also checked against that literal at every release tag
+  (phases 06 and 07). Reading one release isn't enough: before 2.1.0, zlib-ng named and
   worded its identity string differently, and a pattern written from 2.3.3
   alone missed it. Rows without an identity are unchecked against older
   releases. Version 1 scans current releases only, and before anything is
@@ -372,8 +372,10 @@ the package list. One row per prefix, library and way of identifying it:
   - For `library_string` and `bare_version`, **identity_file** is the
     upstream source file that defines or assembles the string, at the
     release the report found. When the string there is one C literal,
-    **identity** is the variable or macro that names it, and the pattern
-    is checked at every release tag; otherwise **identity** is empty. The
+    **identity** can name the variable or macro that holds it, and the
+    pattern is then checked at every release tag. Leave it empty when the
+    check can't pass for reasons other than a wrong pattern, such as
+    libpng's beta tags, whose versions aren't bare-version shaped. The
     string must be the library's own; choosing it means reading upstream
     source, and that is what the manual step is for.
   - A `bare_version` row's pattern is `{version}`.
