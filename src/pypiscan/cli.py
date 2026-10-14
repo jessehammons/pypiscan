@@ -86,6 +86,12 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
     )
     p_scan.add_argument("package_list", type=Path, help="Package list CSV file.")
     p_scan.add_argument(
+        "--library-map",
+        type=Path,
+        required=True,
+        help="Library map CSV file, normally data/libraries.csv.",
+    )
+    p_scan.add_argument(
         "--episode-dir", type=Path, required=True, help="Directory for this run."
     )
     p_scan.add_argument(
@@ -107,6 +113,7 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
             p_scan.error("--count must be at least 1")
         return scan(
             args.package_list,
+            args.library_map,
             args.episode_dir,
             args.cache_dir,
             args.count,
