@@ -57,6 +57,22 @@ class MapRow:
     osv: str
 
 
+def _split(column: str, text: str, allowed: set[str]) -> list[str]:
+    """Split ``text`` into literals and placeholder names, alternating.
+
+    Raises ``ValueError`` unless it has exactly one ``{version}`` and only
+    ``allowed`` placeholders.
+    """
+    parts = PLACEHOLDER.split(text)
+    names = parts[1::2]
+    unknown = sorted(set(names) - allowed)
+    if unknown:
+        raise ValueError(f"{column} has an unknown placeholder {{{unknown[0]}}}")
+    if names.count("version") != 1:
+        raise ValueError(f"{column} needs exactly one {{version}}")
+    return parts
+
+
 def matcher(pattern: str, kind: str) -> re.Pattern[str]:
     """Compile ``pattern`` for ``fullmatch``, with the version as group 1.
 
@@ -64,13 +80,7 @@ def matcher(pattern: str, kind: str) -> re.Pattern[str]:
     none, and everything else matches literally. Raises ``ValueError`` for
     a pattern a ``kind`` row can't have.
     """
-    parts = PLACEHOLDER.split(pattern)
-    names = parts[1::2]
-    unknown = sorted(set(names) - {"version", "any"})
-    if unknown:
-        raise ValueError(f"pattern has an unknown placeholder {{{unknown[0]}}}")
-    if names.count("version") != 1:
-        raise ValueError("pattern needs exactly one {version}")
+    parts = _split("pattern", pattern, {"version", "any"})
     if kind == "bare_version" and pattern != "{version}":
         raise ValueError("a bare_version pattern is {version}")
     version = BARE_VERSION if kind == "bare_version" else VERSION
@@ -95,6 +105,12 @@ def _row_problem(row: dict[str, str]) -> str | None:
         return None
     if not row["repo"]:
         return "repo is empty"
+    if row["tags"]:
+        # A typo here would make phase 06 match no tags and check nothing.
+        try:
+            _split("tags", row["tags"], {"version"})
+        except ValueError as exc:
+            return str(exc)
     kind = row["kind"]
     if not kind:
         filled = [n for n in ("pattern", "identity_file", "identity") if row[n]]

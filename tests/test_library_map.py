@@ -239,3 +239,25 @@ def test_bare_version_shape(text: str, version: str | None) -> None:
     assert (match and match.group(1)) == version
     # The same pattern in another kind takes any version.
     assert matcher("{version}", "build_path").fullmatch("1.3.1.zlib-ng")
+
+
+@pytest.mark.parametrize("tags", ["v{version}", "bzip2-{version}"])
+def test_accepts_tags_with_one_version(tmp_path: Path, tags: str) -> None:
+    row = f"libz,zlib,r,{tags},,,,,,"
+    assert load_library_map(write_map(tmp_path / "m.csv", row))[0].tags == tags
+
+
+@pytest.mark.parametrize(
+    ("tags", "message"),
+    [
+        ("v1.2", r"tags needs exactly one \{version\}"),
+        ("{version}-{version}", r"tags needs exactly one \{version\}"),
+        ("v{any}", r"tags has an unknown placeholder \{any\}"),
+    ],
+)
+def test_rejects_tags_without_one_version(
+    tmp_path: Path, tags: str, message: str
+) -> None:
+    path = write_map(tmp_path / "m.csv", f"libz,zlib,r,{tags},,,,,,")
+    with pytest.raises(LibraryMapError, match=f"{path}:2: {message}"):
+        load_library_map(path)
