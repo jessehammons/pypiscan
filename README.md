@@ -231,7 +231,8 @@ the library map (or marks the prefix `skip`), commits the map, and reruns
 Part 2:
 
 6. `06-upstream` (network, per library): clone the library's repository
-   into the cache, or update the clone, and at every release tag read each
+   into the cache, or fetch into the existing clone (see
+   [Conventions](#conventions)), and at every release tag read each
    identity string the map names, as a C literal. A string assembled from
    macros is an `error` line for that library until a preprocessor step is
    added.
@@ -325,9 +326,9 @@ Rules:
   stays, and `scan` exits 130. The next run stops at pre-flight until the
   file is deleted.
 - **One phase at a time, no retries.** An `error` line stands. Only phases
-  01, 02, 06 and 09 use the network, through an HTTP client (or, for 06, a
-  git client) that tests replace with recorded responses or a synthetic
-  repository.
+  01, 02, 06 and 09 use the network, through an HTTP client (or, for 06,
+  the git command) that tests replace with recorded responses or a
+  synthetic repository.
 - When every phase finishes, `scan` exits 0, even if some lines are
   `error`: errors are data. It exits 3 when it stops for the manual step.
   Counts by status go to stderr, and nothing goes to stdout.
@@ -493,7 +494,11 @@ Adding a library means adding rows to the library map, not code.
   instead of the detectors' citations, and removes the script. The
   committed `tests/upstream/*.tsv` fixtures become copies of phase 06's
   output, so tests still check recognizers offline. Tests use a small
-  synthetic git repository.
+  synthetic git repository. Upstream repositories are read with the git
+  command, replacing the script's dulwich code, as described in
+  [Conventions](#conventions). This item adds that convention's test
+  guard and its ruff exception, the one the maintainer has approved; the
+  PR still calls the exception out.
 - **4.2** Phase 07, recognizers built from phase 06's strings and checked at
   every tag. The hand-written zlib detector (2.1) is replaced once the
   generated recognizers pass its fixtures, including telling zlib from
@@ -578,6 +583,20 @@ Adding a library means adding rows to the library map, not code.
   format means bumping `schema_version`.
 - ELF parsing uses pyelftools, not `readelf` or `nm`, so the tool behaves the
   same on macOS and Linux.
+- Upstream repositories are read with the git command, not dulwich or a
+  forge's API. `git tag --contains` answers the range verifier's question
+  (6.3) locally, any host works (libtiff is on GitLab, libwebp on
+  googlesource), and nothing needs a token.
+  - Each repository is a bare, blobless clone in the cache
+    (`git clone --bare --filter=blob:none`): every commit and tag, with a
+    file's contents fetched the first time it is read. OpenSSL's is about
+    80 MB.
+  - A bare clone has no fetch refspec, so later runs fetch with explicit
+    ones, `+refs/heads/*:refs/heads/*` and `+refs/tags/*:refs/tags/*`.
+    `--mirror` would also copy GitHub's pull-request refs.
+  - git runs from one module, by the absolute path `shutil.which` returns,
+    with an argument list and never a shell. That module alone ignores
+    ruff's S603, which flags every subprocess call however it is made.
 - Tests build synthetic wheels in `tmp_path`. No real wheels or binaries are
   committed.
 - Tests never touch the network, and there is no per-test escape hatch. Code
@@ -585,6 +604,13 @@ Adding a library means adding rows to the library map, not code.
   at the HTTP-client layer, not through a local server. Anything that
   genuinely needs a live network is an end-to-end check that lives outside
   the pytest suite.
+- pytest-socket only sees sockets in the test process, not in a `git`
+  subprocess. An autouse fixture in `tests/conftest.py` therefore sets
+  `GIT_ALLOW_PROTOCOL=file` for every test, so git can only reach local
+  repositories. It also sets `GIT_CONFIG_GLOBAL=/dev/null` and
+  `GIT_CONFIG_NOSYSTEM=1`, so a developer's own git settings, such as commit
+  signing or URL rewrites, don't change what tests do. Tests build their
+  synthetic repositories with the git command in `tmp_path`.
 - Wheels for manual checks are downloaded with `uvx pip download`, since uv
   virtual environments don't include pip. pip doesn't widen an explicit
   `--platform manylinux_2_28_x86_64` to older glibc versions (it widens only
