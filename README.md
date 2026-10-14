@@ -424,12 +424,12 @@ uv run python -m pypiscan scan data/smoke.csv \
   --cache-dir ~/pypiscan/cache --count 4
 ```
 
-- **3.1** PyPI client and wheel selection, plus
+- **3.1** ✓ PyPI client and wheel selection, plus
   `fetch <name>==<version> --cache-dir C`: read one release from PyPI's JSON
   API, choose its target wheel, download it into the cache and verify its
   sha256. Tests use recorded responses. Manual check: for five packages, the
   chosen file matches what `uvx pip download` picks with the flags in
-  [Conventions](#conventions). **← current**
+  [Conventions](#conventions).
 - **3.2** The package list format and loader, and the smoke list. A package
   list is a CSV file with columns `name` and `version`, at most 100 rows, in
   processing order. The loader rejects an empty list, more than 100 rows,
@@ -442,7 +442,7 @@ uv run python -m pypiscan scan data/smoke.csv \
   whose target wheel is over the wheel size limit (`too_large`). Each row
   pins the package's latest final release when the list is written.
   `data/README.md` says why each row is there. Manual check: every row's
-  release exists on PyPI.
+  release exists on PyPI. **← current**
 - **3.3** `scan`'s first runnable version: the command-line rules,
   pre-flight checks 1 to 4 without the library map, `episode.json`, and
   the phase runner

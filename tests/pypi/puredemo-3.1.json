@@ -1,0 +1,58 @@
+{
+  "info": {
+    "name": "puredemo",
+    "version": "3.1",
+    "requires_python": ">=3.9",
+    "summary": "Hand-written fixture for puredemo.",
+    "yanked": false,
+    "yanked_reason": null,
+    "package_url": "https://pypi.org/project/puredemo/",
+    "release_url": "https://pypi.org/project/puredemo/3.1/"
+  },
+  "last_serial": 12345678,
+  "urls": [
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "2b8aa2bbb37426a89053c9c31ca995398f93a8276d4ae09706610887326d87a2",
+        "md5": "3af40c1259941d69f0b7de52920b4d2c",
+        "sha256": "951a9b031e560d3da049d82d2fcb8256b198e08327a40abab81de303b10fc0e9"
+      },
+      "downloads": -1,
+      "filename": "puredemo-3.1.tar.gz",
+      "has_sig": false,
+      "md5_digest": "3af40c1259941d69f0b7de52920b4d2c",
+      "packagetype": "sdist",
+      "python_version": "source",
+      "requires_python": ">=3.9",
+      "size": 35,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/95/1a/9b031e560d3da049d82d2fcb8256b198e08327a40abab81de303b10fc0e9/puredemo-3.1.tar.gz",
+      "yanked": false,
+      "yanked_reason": null
+    },
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "c4d39ea361dfdf645d4934214ca760df2ebf59521d8b41590b8200996569d948",
+        "md5": "ab3039e08225e3f7d85314c54470251b",
+        "sha256": "c1f658a76faefbe9a4b7d5b0309cdc8c84d0daad4d0471b6215ee98df73a8884"
+      },
+      "downloads": -1,
+      "filename": "puredemo-3.1-py3-none-any.whl",
+      "has_sig": false,
+      "md5_digest": "ab3039e08225e3f7d85314c54470251b",
+      "packagetype": "bdist_wheel",
+      "python_version": "py3",
+      "requires_python": ">=3.9",
+      "size": 45,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/c1/f6/58a76faefbe9a4b7d5b0309cdc8c84d0daad4d0471b6215ee98df73a8884/puredemo-3.1-py3-none-any.whl",
+      "yanked": false,
+      "yanked_reason": null
+    }
+  ],
+  "vulnerabilities": []
+}

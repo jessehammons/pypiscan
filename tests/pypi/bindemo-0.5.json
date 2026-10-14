@@ -1,0 +1,79 @@
+{
+  "info": {
+    "name": "bindemo",
+    "version": "0.5",
+    "requires_python": ">=3.9",
+    "summary": "Hand-written fixture for bindemo.",
+    "yanked": false,
+    "yanked_reason": null,
+    "package_url": "https://pypi.org/project/bindemo/",
+    "release_url": "https://pypi.org/project/bindemo/0.5/"
+  },
+  "last_serial": 12345678,
+  "urls": [
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "2d6a505618007fc9cb8690b0617d2876b88fb3e2adfb647a742e3b0d06cf2e53",
+        "md5": "95aec28b42240d5ee8269187b1f87cbd",
+        "sha256": "ec0adfebf901f91eab1d53d8fd82f85fe59287112825a6d0dd98fc7b57667e23"
+      },
+      "downloads": -1,
+      "filename": "bindemo-0.5-py3-none-macosx_11_0_arm64.whl",
+      "has_sig": false,
+      "md5_digest": "95aec28b42240d5ee8269187b1f87cbd",
+      "packagetype": "bdist_wheel",
+      "python_version": "py3",
+      "requires_python": ">=3.9",
+      "size": 58,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/ec/0a/dfebf901f91eab1d53d8fd82f85fe59287112825a6d0dd98fc7b57667e23/bindemo-0.5-py3-none-macosx_11_0_arm64.whl",
+      "yanked": false,
+      "yanked_reason": null
+    },
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "4b4bd791abb3ac2d390df3a1972f3e8ab0816e1c53d4c4b8d4ee0c0cb58c15d7",
+        "md5": "5cbaaf1e047838ce45da2d96ef4a132b",
+        "sha256": "655cd148248e31d25429eb54d7f926016094d9555f124cd86d466060291a7ff6"
+      },
+      "downloads": -1,
+      "filename": "bindemo-0.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "has_sig": false,
+      "md5_digest": "5cbaaf1e047838ce45da2d96ef4a132b",
+      "packagetype": "bdist_wheel",
+      "python_version": "py3",
+      "requires_python": ">=3.9",
+      "size": 83,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/65/5c/d148248e31d25429eb54d7f926016094d9555f124cd86d466060291a7ff6/bindemo-0.5-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "yanked": false,
+      "yanked_reason": null
+    },
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "3d592a2b10ced37243d15330a5f111aeba07ae8d16e1bd1180e77a083507606c",
+        "md5": "b7473bfc8fc4e6cf8f777e4d9777179c",
+        "sha256": "e7010f399104c17f897f3737e2a593b856c1a3e1dd76795ea111cc1fd4795908"
+      },
+      "downloads": -1,
+      "filename": "bindemo-0.5-py3-none-any.whl",
+      "has_sig": false,
+      "md5_digest": "b7473bfc8fc4e6cf8f777e4d9777179c",
+      "packagetype": "bdist_wheel",
+      "python_version": "py3",
+      "requires_python": ">=3.9",
+      "size": 44,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/e7/01/0f399104c17f897f3737e2a593b856c1a3e1dd76795ea111cc1fd4795908/bindemo-0.5-py3-none-any.whl",
+      "yanked": false,
+      "yanked_reason": null
+    }
+  ],
+  "vulnerabilities": []
+}

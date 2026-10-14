@@ -689,6 +689,7 @@ name = "pypiscan"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "packaging" },
     { name = "pyelftools" },
 ]
 
@@ -706,7 +707,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pyelftools", specifier = ">=0.33" }]
+requires-dist = [
+    { name = "packaging", specifier = ">=25" },
+    { name = "pyelftools", specifier = ">=0.33" },
+]
 
 [package.metadata.requires-dev]
 dev = [
