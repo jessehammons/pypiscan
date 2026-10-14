@@ -445,7 +445,7 @@ uv run python -m pypiscan scan data/smoke.csv \
   pins the package's latest final release when the list is written.
   `data/README.md` says why each row is there. Manual check: every row's
   release exists on PyPI.
-- **3.3** `scan`'s first runnable version: the command-line rules,
+- **3.3** ✓ `scan`'s first runnable version: the command-line rules,
   pre-flight checks 1 to 4 without the library map, `episode.json`, and
   the phase runner
   (`.partial` files, one line per package, `skipped` lines, Ctrl-C, exit
@@ -454,12 +454,11 @@ uv run python -m pypiscan scan data/smoke.csv \
   3.4, so episodes from smoke runs stay usable as phases are added. Manual
   check: a smoke run with `--count 4`, its `01-resolve.jsonl`, and a
   second run of the same command that skips phase 01 and exits 0.
-  **← current**
 - **3.4** Phases 02 and 03. Phase 02 reuses 3.1's download and skips
   wheels over the wheel size limit as `too_large`. In phase 03, a bad zip or
   malformed ELF becomes an `error` line, and zip members over the
   zip-member size limit are recorded and skipped. Manual check: rerunning
-  3.3's smoke episode runs only phases 02 and 03.
+  3.3's smoke episode runs only phases 02 and 03. **← current**
 - **3.5** `pypiscan strings <wheel>` and phase 04. `strings` lists, for each
   ELF binary, every printable string that contains a version-like token
   (digit runs separated by dots), with its offset and a template in which
