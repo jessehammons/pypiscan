@@ -221,9 +221,8 @@ pypiscan scan <package-list> --library-map M --episode-dir D --cache-dir C --cou
   only the usage line, so the check is made after parsing.) A value below 1
   is an error and exits 2; a value larger than the list is clamped to its
   length.
-- `--library-map` names the committed library map, normally
-  `data/libraries.csv`. It arrives with phase 05 (roadmap 3.7); until then
-  `scan` doesn't take it.
+- `--library-map` is required and names the committed library map,
+  normally `data/libraries.csv`.
 - The episode directory holds one run's results. The cache directory holds
   downloaded wheels and upstream clones, both shared between episodes. A
   wheel is stored as `wheels/<sha256>/<filename>`: a directory named by
@@ -254,12 +253,16 @@ Part 1:
 3. `03-inspect` (per package): `inspect` records for the wheel's binaries.
 4. `04-strings` (per package): `strings` records.
 5. `05-libraries` (per package): each shared library in the wheel's
-   `.libs/` directory, with its prefix: the filename without auditwheel's
-   hash and version suffix (`libjpeg-1a2b3c4d.so.62.4.0` becomes
-   `libjpeg`). Then the phase writes the library report into the episode:
-   for each prefix, how many wheels and files carry it, and its `strings`
-   templates ranked by how many wheels carry each one. The report uses
-   only strings that pass the noise filter (see
+   `.libs/` directory, with its path and prefix: the filename cut at
+   auditwheel's hash, `-` and 8 hex digits, so `libjpeg-1a2b3c4d.so.62.4.0`
+   becomes `libjpeg`. A library repaired twice has two hashes, and the
+   first one cuts. A name with no hash is cut at its first `.so`. Then the
+   phase writes the library report into the episode, `library-report.md`:
+   prefixes ordered by how many wheels carry them, and for each, how many
+   wheels and files carry it, the packages carrying it, and up to 20 of its
+   `strings` templates ranked by how many wheels carry each one, each with
+   one real example string. The report uses only strings that pass the
+   noise filter (see
    [How versions are identified](#how-versions-are-identified)), and cuts
    templates longer than 200 characters to 200, so a long run of text
    doesn't become a template of its own.
@@ -267,8 +270,9 @@ Part 1:
 **Manual step.** Once phase 05 is finished, in this run or an earlier one,
 every run compares phase 05's prefixes with the current library map and
 rewrites `library-map-todo.csv` in the episode, one row per prefix the map
-doesn't list. It is derived from the map, not a phase file, so it is never
-skipped as finished. If it has rows, `scan` lists the prefixes on stderr and
+doesn't list, in the map's columns with only `prefix` filled in. It is
+derived from the map, not a phase file, so it is never skipped as
+finished. If it has rows, `scan` lists the prefixes on stderr and
 exits 3. The maintainer reads the report and, for each prefix, adds rows to
 the library map (or marks the prefix `skip`), commits the map, and reruns
 `scan`, which goes on to phase 06 once the todo is empty.
@@ -332,8 +336,12 @@ the package list. One row per prefix, library and way of identifying it:
 - A library can have several rows, one per way of identifying it. Prefer a
   library string; use a build path or a bare version for a library that
   embeds no library string.
+- **repo** is required on every mapped row, since phase 06 clones it for
+  every kind. **cpe** and **osv** may be empty until the CVE table (6.1)
+  requires them.
 - `skip` marks a prefix the maintainer has looked at and isn't tracking,
-  so it doesn't come back as a TODO.
+  so it doesn't come back as a TODO. A `skip` row has every column empty
+  except **prefix**.
 - A map with only its header row is valid: part 1's first run starts from
   one.
 - To find a prefix's upstream, read its most common strings in the library
@@ -484,6 +492,7 @@ file and every later one. Smoke runs use the smoke list (3.2) with a small
 
 ```bash
 uv run python -m pypiscan scan data/smoke.csv \
+  --library-map data/libraries.csv \
   --episode-dir ~/pypiscan/episodes/smoke-4 \
   --cache-dir ~/pypiscan/cache --count 4
 ```
@@ -539,7 +548,7 @@ uv run python -m pypiscan scan data/smoke.csv \
   applied when scanning, so raising it doesn't mean regenerating the list.
   The snapshot month and the selection rule go in `data/README.md`.
   Versions are pinned, and refreshing the list is its own pull request.
-- **3.7** Phase 05, `--library-map`, the library map's format and loader
+- **3.7** ✓ Phase 05, `--library-map`, the library map's format and loader
   (pre-flight check 2), the library report, `library-map-todo.csv` and the
   stop for the manual step. The loader accepts a map with only its header
   row, and rejects missing fields, unknown columns, an unknown kind, a row
@@ -548,9 +557,10 @@ uv run python -m pypiscan scan data/smoke.csv \
   `skip` and mapped. The report applies the noise filter and the
   200-character template cut. Manual check: a full run of
   `data/packages.csv` with `--count 100`; the PR includes the library
-  report's prefixes, ordered by how many wheels carry them. **← current**
+  report's prefixes, ordered by how many wheels carry them.
 - **3.8** *(maintainer input)* The first library map: rows for the prefixes
   in 3.7's report, most frequent first, chosen by the maintainer.
+  **← current**
 
 Later: a per-wheel time limit, which needs a subprocess per wheel.
 
@@ -597,7 +607,8 @@ Adding a library means adding rows to the library map, not code.
   not just conclusions: fix commits, fixed version and release date per
   maintained branch, introduced version (or "unknown"), affected component
   (library code or a bundled tool), disputed status and sources. Seeded with
-  CVE-2023-4863. Adds the `cpe` and `osv` columns to the library map.
+  CVE-2023-4863. Requires `cpe` and `osv` on the library map's mapped
+  rows.
 - **6.2** Phase 09's importer: draft candidate rows for each library from
   NVD, by CPE, and OSV, by OSV identifier.
 - **6.3** Range verifier: given phase 06's clone and a row's fix commits,

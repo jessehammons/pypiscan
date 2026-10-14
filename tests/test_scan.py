@@ -1,7 +1,7 @@
 import io
 import json
 import signal
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -10,6 +10,7 @@ import pytest
 from elf_builder import build_elf
 from pypiscan import scan as scan_module
 from pypiscan.cli import main
+from pypiscan.library_map import COLUMNS
 from pypiscan.package_list import Package
 from pypiscan.scan import (
     EXIT_INTERRUPTED,
@@ -17,12 +18,14 @@ from pypiscan.scan import (
     WHEEL_SIZE_LIMIT,
     ZIP_MEMBER_SIZE_LIMIT,
     Line,
+    Lines,
     Phase,
     Result,
     Stop,
     fetch_phase,
     git_work_tree,
     inspect_phase,
+    libraries_phase,
     run_phases,
     scan,
     strings_phase,
@@ -43,6 +46,8 @@ class Dirs:
         self.list = write_list(
             tmp_path / "list.csv", "demo,1.0", "puredemo,3.1", "missing,9.9"
         )
+        self.map = tmp_path / "libraries.csv"
+        self.map.write_text(",".join(COLUMNS) + "\n")
         self.episode = tmp_path / "episode"
         self.cache = tmp_path / "cache"
 
@@ -50,6 +55,8 @@ class Dirs:
         return [
             "scan",
             str(self.list),
+            "--library-map",
+            str(self.map),
             "--episode-dir",
             str(self.episode),
             "--cache-dir",
@@ -80,6 +87,11 @@ def test_scan_runs_every_phase(dirs: Dirs, capsys: pytest.CaptureFixture[str]) -
     # The recorded wheel body isn't a real zip, so phase 03 reports it.
     assert "03-inspect: 0 ok, 2 skipped, 1 error" in err
     assert "04-strings: 0 ok, 3 skipped, 0 error" in err
+    assert "05-libraries: 0 ok, 3 skipped, 0 error" in err
+    # No prefixes, so nothing to map: the todo has only its header.
+    todo = (dirs.episode / "library-map-todo.csv").read_text()
+    assert todo == ",".join(COLUMNS) + "\n"
+    assert (dirs.episode / "library-report.md").is_file()
     demo, pure, missing = dirs.lines()
     assert demo["name"] == "demo"
     assert demo["status"] == "ok"
@@ -301,7 +313,14 @@ def test_sigint_sets_the_stop_flag(tmp_path: Path, dirs: Dirs) -> None:
 
     original = signal.getsignal(signal.SIGINT)
     status = scan(
-        dirs.list, dirs.episode, dirs.cache, 3, Interrupting(), io.StringIO(), stop
+        dirs.list,
+        dirs.map,
+        dirs.episode,
+        dirs.cache,
+        3,
+        Interrupting(),
+        io.StringIO(),
+        stop,
     )
     assert status == EXIT_INTERRUPTED
     assert stop.requested
@@ -415,7 +434,9 @@ def test_phase_02_is_skipped_when_phase_01_skipped(dirs: Dirs) -> None:
     # with phase 01 returning skipped and no_target, then phase 02 fails if
     # it runs. puredemo never produces a WheelFile.
     err = io.StringIO()
-    status = scan(dirs.list, dirs.episode, dirs.cache, 2, RecordedClient(), err)
+    status = scan(
+        dirs.list, dirs.map, dirs.episode, dirs.cache, 2, RecordedClient(), err
+    )
     assert status == 0
     [demo, pure] = dirs.lines("02-fetch")
     assert pure["status"] == "skipped" and pure["reason"] == "01-resolve"
@@ -578,3 +599,202 @@ def test_phase_04_skips_oversized_zip_members(
     assert result.data["skipped_members"] == [
         {"path": "big.libs/libbig.so", "size": len(LIBS_ELF)}
     ]
+
+
+def test_missing_library_map_is_a_usage_error(
+    dirs: Dirs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    argv = dirs.argv("--count", "1")
+    i = argv.index("--library-map")
+    del argv[i : i + 2]
+    with pytest.raises(SystemExit) as exc:
+        main(argv, client=RecordedClient())
+    assert exc.value.code == 2
+    assert "--library-map" in capsys.readouterr().err
+    assert not dirs.episode.exists()
+
+
+def test_bad_library_map_fails_preflight(
+    dirs: Dirs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dirs.map.write_text(",".join(COLUMNS) + "\nlibz,zlib,header_string,r,f,i,,\n")
+    assert run(dirs, "--count", "1") == 2
+    assert f"{dirs.map}:2: unknown kind 'header_string'" in capsys.readouterr().err
+    assert not dirs.episode.exists()
+    # Both inputs are checked, so one run names both problems.
+    dirs.list.write_text("name,version\n")
+    assert run(dirs, "--count", "1") == 2
+    err = capsys.readouterr().err
+    assert "unknown kind" in err and "no packages" in err
+    dirs.map.unlink()
+    assert run(dirs, "--count", "1") == 2
+    assert "No such file" in capsys.readouterr().err
+
+
+def test_phase_05_lists_libs_files_with_their_prefixes(tmp_path: Path) -> None:
+    records: list[object] = [
+        {"path": "foo.libs/libjpeg-1a2b3c4d.so.62.4.0", "in_libs_dir": True},
+        {"path": "foo/_imaging.so", "in_libs_dir": False},
+        {"path": "foo.libs/libfoo.so.1", "in_libs_dir": True},
+    ]
+    earlier: dict[str, Line] = {
+        "03-inspect": {"status": "ok", "records": records},
+        "04-strings": {"status": "ok", "records": []},
+    }
+    phase = libraries_phase(tmp_path)
+    assert phase.name == "05-libraries"
+    result = phase.run(Package("foo", "1"), earlier)
+    assert result == Result(
+        "ok",
+        None,
+        {
+            "libraries": [
+                {"path": "foo.libs/libjpeg-1a2b3c4d.so.62.4.0", "prefix": "libjpeg"},
+                {"path": "foo.libs/libfoo.so.1", "prefix": "libfoo"},
+            ]
+        },
+    )
+
+
+def test_finish_runs_before_the_phase_file_is_finished(tmp_path: Path) -> None:
+    seen: list[object] = []
+
+    def finish(names: Sequence[str], lines: Lines) -> None:
+        seen.append(list(names))
+        seen.append({n: list(lines[n]) for n in names})
+        seen.append(sorted(p.name for p in tmp_path.iterdir()))
+
+    phases = [phase("01-one", "error", "boom"), Phase("02-two", phase("x").run, finish)]
+    assert run_phases(tmp_path, PACKAGES, phases, Stop(), io.StringIO()) == 0
+    assert seen == [
+        ["a", "b"],
+        {"a": ["01-one", "02-two"], "b": ["01-one", "02-two"]},
+        ["01-one.jsonl", "02-two.jsonl.partial"],
+    ]
+    # A rerun skips the finished phase, and its finish with it.
+    assert run_phases(tmp_path, PACKAGES, phases, Stop(), io.StringIO()) == 0
+    assert len(seen) == 3
+
+
+def test_a_failed_finish_leaves_the_partial_file(tmp_path: Path) -> None:
+    def finish(names: Sequence[str], lines: Lines) -> None:
+        raise OSError("disk full")
+
+    phases = [Phase("01-one", phase("x").run, finish)]
+    with pytest.raises(OSError, match="disk full"):
+        run_phases(tmp_path, PACKAGES, phases, Stop(), io.StringIO())
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["01-one.jsonl.partial"]
+
+
+def test_interrupted_phase_skips_finish(tmp_path: Path) -> None:
+    stop = Stop()
+
+    def go(package: Package, earlier: Mapping[str, Line]) -> Result:
+        stop.requested = True
+        return Result("ok")
+
+    def finish(names: Sequence[str], lines: Lines) -> None:
+        raise AssertionError("finish ran for an unfinished phase")
+
+    phases = [Phase("01-one", go, finish)]
+    assert run_phases(tmp_path, PACKAGES, phases, stop, io.StringIO()) == 130
+
+
+LIBS = {
+    "demo": [
+        ("demo.libs/libpng16-1a2b3c4d.so.16.58.0", "libpng version 1.6.58"),
+        ("demo.libs/libgfortran-040039e1.so.5.0.0", "GNU Fortran 14.2.1"),
+        ("demo/_ext.so", "deflate 1.3.1 Copyright"),
+    ],
+    "puredemo": [("puredemo.libs/libpng16.so.16", "libpng version 1.6.50")],
+}
+
+
+def stub_phases(client: object, cache_dir: Path, episode: Path) -> list[Phase]:
+    """Phases 01 to 04 as stubs over LIBS, then the real phase 05."""
+
+    def resolve(package: Package, earlier: Mapping[str, Line]) -> Result:
+        return Result("ok") if package.name in LIBS else Result("error", "HTTP 404")
+
+    def inspect(package: Package, earlier: Mapping[str, Line]) -> Result:
+        records: list[object] = [
+            {"path": path, "in_libs_dir": ".libs/" in path}
+            for path, _ in LIBS[package.name]
+        ]
+        return Result("ok", None, {"records": records})
+
+    def strings(package: Package, earlier: Mapping[str, Line]) -> Result:
+        records: list[object] = [
+            {
+                "path": path,
+                "strings": [
+                    {"section": ".rodata", "text": text, "template": "T " + text},
+                    {
+                        "section": ".comment",
+                        "text": "GCC: (GNU) 14.2.1",
+                        "template": "G",
+                    },
+                ],
+            }
+            for path, text in LIBS[package.name]
+        ]
+        return Result("ok", None, {"records": records})
+
+    return [
+        Phase("01-resolve", resolve),
+        phase("02-fetch"),
+        Phase("03-inspect", inspect),
+        Phase("04-strings", strings),
+        scan_module.libraries_phase(episode),
+    ]
+
+
+def test_scan_stops_for_the_manual_step(
+    dirs: Dirs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(scan_module, "phases", stub_phases)
+    assert run(dirs, "--count", "3") == 3
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    err = captured.err
+    assert "05-libraries: 2 ok, 1 skipped, 0 error" in err
+    assert err.endswith(
+        "library-map-todo.csv lists 2 prefixes the library map doesn't; add rows "
+        "for them, or mark them skip, and rerun:\n  libpng16\n  libgfortran\n"
+    )
+    [demo, pure, missing] = dirs.lines("05-libraries")
+    demo_libs = cast(list[dict[str, str]], demo["libraries"])
+    assert [lib["prefix"] for lib in demo_libs] == ["libpng16", "libgfortran"]
+    assert pure["libraries"] == [
+        {"path": "puredemo.libs/libpng16.so.16", "prefix": "libpng16"}
+    ]
+    assert missing["status"] == "skipped" and missing["reason"] == "01-resolve"
+    todo = dirs.episode / "library-map-todo.csv"
+    header = ",".join(COLUMNS)
+    assert todo.read_text() == f"{header}\nlibpng16,,,,,,,\nlibgfortran,,,,,,,\n"
+    text = (dirs.episode / "library-report.md").read_text()
+    assert "1. ` libpng16 `: 2 wheels, 2 files\n2. ` libgfortran `: 1 wheel" in text
+    assert "2 wheels, 2 files: demo, puredemo" in text
+    assert "   - e.g. ` libpng version 1.6.58 `" in text
+    assert "GCC" not in text and "deflate" not in text
+
+    # A rerun skips every phase but still rewrites the todo.
+    todo.unlink()
+    report_before = (dirs.episode / "library-report.md").read_bytes()
+    assert run(dirs, "--count", "3") == 3
+    assert "05-libraries: already finished, skipped" in capsys.readouterr().err
+    assert todo.read_text().count("\n") == 3
+    assert (dirs.episode / "library-report.md").read_bytes() == report_before
+
+    # Mapping one prefix leaves the other.
+    png = "libpng16,libpng,library_string,https://github.com/pnggroup/libpng,png.c,PNG_HEADER_VERSION_STRING,,"
+    dirs.map.write_text(f"{header}\n{png}\n")
+    assert run(dirs, "--count", "3") == 3
+    assert "\n  libgfortran\n" in capsys.readouterr().err
+    assert todo.read_text() == f"{header}\nlibgfortran,,,,,,,\n"
+
+    # Once every prefix is listed, the todo is empty and scan exits 0.
+    dirs.map.write_text(f"{header}\n{png}\nlibgfortran,skip,,,,,,\n")
+    assert run(dirs, "--count", "3") == 0
+    assert "library-map-todo" not in capsys.readouterr().err
+    assert todo.read_text() == f"{header}\n"

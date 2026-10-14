@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import TextIO, cast
 
 from pypiscan.fetch import download
+from pypiscan.library_map import LibraryMapError, MapRow, load_library_map
+from pypiscan.library_report import libraries, report, todo, write_todo
 from pypiscan.package_list import Package, PackageListError, load_package_list
 from pypiscan.pypi import (
     ARCH,
@@ -44,10 +46,13 @@ ZIP_MEMBER_SIZE_LIMIT = 512 * MB
 TARGET = f"{INTERPRETER}-manylinux_2_{MAX_GLIBC_MINOR}_{ARCH}"
 STATUSES = ("ok", "skipped", "error")
 EXIT_PREFLIGHT = 2
+EXIT_MANUAL_STEP = 3
 EXIT_INTERRUPTED = 130
 PHASE_FILE = re.compile(r"(\d\d)-[a-z0-9-]+\.jsonl(\.partial)?")
 
 Line = dict[str, object]
+# Each package's lines, keyed by package name and then by phase name.
+Lines = Mapping[str, Mapping[str, Line]]
 
 
 @dataclass
@@ -70,10 +75,13 @@ class Phase:
 
     ``run`` gets each package and its lines from every earlier phase, keyed
     by phase name. It is only called when the previous phase's line is ok.
+    ``finish``, if set, gets every package's lines, this phase's included,
+    once every package is done and before the phase file is finished.
     """
 
     name: str
     run: Callable[[Package, Mapping[str, Line]], Result]
+    finish: Callable[[Sequence[str], Lines], None] | None = None
 
 
 def resolve_phase(client: HttpClient) -> Phase:
@@ -174,12 +182,29 @@ def strings_phase() -> Phase:
     return Phase("04-strings", run)
 
 
-def phases(client: HttpClient, cache_dir: Path) -> list[Phase]:
+def libraries_phase(episode: Path) -> Phase:
+    """Phase 05: each `.libs/` shared library in phase 03's records, with its
+    prefix. When every package is done, writes ``library-report.md``.
+    """
+
+    def run(package: Package, earlier: Mapping[str, Line]) -> Result:
+        records = cast(list[Line], earlier["03-inspect"]["records"])
+        return Result("ok", None, {"libraries": libraries(records)})
+
+    def finish(packages: Sequence[str], lines: Lines) -> None:
+        text = report(packages, lines)
+        (episode / "library-report.md").write_text(text, encoding="utf-8")
+
+    return Phase("05-libraries", run, finish)
+
+
+def phases(client: HttpClient, cache_dir: Path, episode: Path) -> list[Phase]:
     return [
         resolve_phase(client),
         fetch_phase(client, cache_dir),
         inspect_phase(),
         strings_phase(),
+        libraries_phase(episode),
     ]
 
 
@@ -268,9 +293,9 @@ def _episode_problems(episode: Path, inputs: Line) -> list[str]:
 
 
 def preflight(
-    package_list: Path, episode: Path, cache: Path, count: int
-) -> tuple[list[Package], int, list[str]]:
-    """Checks 1 to 4. Returns the packages, clamped count and any problems."""
+    package_list: Path, library_map: Path, episode: Path, cache: Path, count: int
+) -> tuple[list[Package], list[MapRow], int, list[str]]:
+    """Checks 1 to 4. Returns the packages, map rows, clamped count and problems."""
     problems: list[str] = []
     for label, directory in (("episode", episode), ("cache", cache)):
         root = git_work_tree(directory)
@@ -279,14 +304,19 @@ def preflight(
                 f"{label} directory {directory} is inside the git working tree "
                 f"at {root}; use a directory outside it"
             )
+    rows: list[MapRow] = []
+    try:
+        rows = load_library_map(library_map)
+    except LibraryMapError as exc:
+        problems.append(str(exc))
     try:
         packages = load_package_list(package_list)
     except PackageListError as exc:
-        return [], 0, [*problems, str(exc)]
+        return [], rows, 0, [*problems, str(exc)]
     count = min(count, len(packages))
     problems += _phase_file_problems(episode)
     problems += _episode_problems(episode, episode_inputs(package_list, count))
-    return packages[:count], count, problems
+    return packages[:count], rows, count, problems
 
 
 def _read_lines(path: Path) -> dict[str, Line]:
@@ -334,6 +364,7 @@ def run_phases(
         else:
             partial = done.with_name(done.name + ".partial")
             counts: Counter[object] = Counter()
+            current: dict[str, Line] = {}
             with partial.open("x", encoding="utf-8") as f:
                 for package in packages:
                     if stop.requested:
@@ -347,6 +378,13 @@ def run_phases(
                     f.write(json.dumps(line) + "\n")
                     f.flush()
                     counts[line["status"]] += 1
+                    current[package.name] = line
+            if phase.finish is not None:
+                names = [package.name for package in packages]
+                phase.finish(
+                    names,
+                    {n: earlier[n] | {phase.name: current[n]} for n in names},
+                )
             partial.replace(done)
             summary = ", ".join(f"{counts[status]} {status}" for status in STATUSES)
             print(f"{phase.name}: {summary}", file=err)
@@ -358,8 +396,28 @@ def run_phases(
     return 0
 
 
+def manual_step(episode: Path, rows: Sequence[MapRow], err: TextIO) -> int:
+    """Rewrite library-map-todo.csv from phase 05; stop if it has rows."""
+    lines = _read_lines(episode / "05-libraries.jsonl")
+    names = list(lines)
+    found = {name: {"05-libraries": line} for name, line in lines.items()}
+    missing = todo(names, found, {row.prefix for row in rows})
+    write_todo(episode / "library-map-todo.csv", missing)
+    if not missing:
+        return 0
+    print(
+        f"library-map-todo.csv lists {len(missing)} prefixes the library map "
+        "doesn't; add rows for them, or mark them skip, and rerun:",
+        file=err,
+    )
+    for prefix in missing:
+        print(f"  {prefix}", file=err)
+    return EXIT_MANUAL_STEP
+
+
 def scan(
     package_list: Path,
+    library_map: Path,
     episode: Path,
     cache: Path,
     count: int,
@@ -368,7 +426,9 @@ def scan(
     stop: Stop | None = None,
 ) -> int:
     """Pre-flight, then create the directories, record episode.json and run."""
-    packages, count, problems = preflight(package_list, episode, cache, count)
+    packages, rows, count, problems = preflight(
+        package_list, library_map, episode, cache, count
+    )
     for problem in problems:
         print(f"pypiscan scan: error: {problem}", file=err)
     if problems:
@@ -397,6 +457,9 @@ def scan(
 
     handler = signal.signal(signal.SIGINT, on_sigint)
     try:
-        return run_phases(episode, packages, phases(client, cache), stop, err)
+        status = run_phases(
+            episode, packages, phases(client, cache, episode), stop, err
+        )
+        return status or manual_step(episode, rows, err)
     finally:
         signal.signal(signal.SIGINT, handler)
