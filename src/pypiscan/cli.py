@@ -9,6 +9,7 @@ from pypiscan.fetch import fetch_release
 from pypiscan.fingerprint import fingerprint_wheel
 from pypiscan.package_list import check_release
 from pypiscan.pypi import HttpClient, PyPIError, UrllibClient
+from pypiscan.scan import EXIT_PREFLIGHT, scan
 from pypiscan.wheel_inspect import WheelError, inspect_wheel
 
 
@@ -68,7 +69,40 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
     p_fetch.add_argument(
         "--cache-dir", type=Path, required=True, help="Directory for cached wheels."
     )
+    p_scan = sub.add_parser(
+        "scan",
+        help="Run the first N packages of a package list through the scan's "
+        "phases, writing results into an episode directory.",
+    )
+    p_scan.add_argument("package_list", type=Path, help="Package list CSV file.")
+    p_scan.add_argument(
+        "--episode-dir", type=Path, required=True, help="Directory for this run."
+    )
+    p_scan.add_argument(
+        "--cache-dir", type=Path, required=True, help="Directory for cached wheels."
+    )
+    # Required, but checked after parsing so a missing --count prints the full
+    # help rather than argparse's usage line.
+    p_scan.add_argument(
+        "--count",
+        type=int,
+        help="Required. Scan the first N packages (clamped to the list's length).",
+    )
     args = parser.parse_args(argv)
+    if args.command == "scan":
+        if args.count is None:
+            p_scan.print_help(sys.stderr)
+            return EXIT_PREFLIGHT
+        if args.count < 1:
+            p_scan.error("--count must be at least 1")
+        return scan(
+            args.package_list,
+            args.episode_dir,
+            args.cache_dir,
+            args.count,
+            client or UrllibClient(),
+            sys.stderr,
+        )
     if args.command == "fetch":
         return fetch(args.release, args.cache_dir, client or UrllibClient())
     if args.command == "fingerprint":
