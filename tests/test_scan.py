@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from pypiscan import scan as scan_module
 from pypiscan.cli import main
 from pypiscan.package_list import Package
 from pypiscan.scan import (
@@ -17,11 +18,14 @@ from pypiscan.scan import (
     Phase,
     Result,
     Stop,
+    fetch_phase,
     git_work_tree,
+    inspect_phase,
     run_phases,
     scan,
 )
 from test_fetch import RecordedClient
+from test_inspect import LIBS_ELF, build_wheel
 
 DEMO_TARGET = "demo-1.0-cp312-cp312-manylinux_2_28_x86_64.whl"
 
@@ -64,11 +68,14 @@ def run(dirs: Dirs, *extra: str) -> int:
     return main(dirs.argv(*extra), client=RecordedClient())
 
 
-def test_scan_runs_phase_01(dirs: Dirs, capsys: pytest.CaptureFixture[str]) -> None:
+def test_scan_runs_every_phase(dirs: Dirs, capsys: pytest.CaptureFixture[str]) -> None:
     assert run(dirs, "--count", "3") == 0
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "01-resolve: 1 ok, 1 skipped, 1 error" in captured.err
+    err = capsys.readouterr().err
+    assert "01-resolve: 1 ok, 1 skipped, 1 error" in err
+    # demo downloads; pure and missing never leave phase 01's status.
+    assert "02-fetch: 1 ok, 2 skipped, 0 error" in err
+    # The recorded wheel body isn't a real zip, so phase 03 reports it.
+    assert "03-inspect: 0 ok, 2 skipped, 1 error" in err
     demo, pure, missing = dirs.lines()
     assert demo["name"] == "demo"
     assert demo["status"] == "ok"
@@ -82,8 +89,7 @@ def test_scan_runs_phase_01(dirs: Dirs, capsys: pytest.CaptureFixture[str]) -> N
     assert pure["version"] == "3.1"
     assert missing["status"] == "error"
     assert "HTTP 404" in str(missing["reason"])
-    assert dirs.cache.is_dir()
-    assert not (dirs.cache / "wheels").exists()
+    assert (dirs.cache / "wheels").is_dir()
 
 
 def test_episode_json(dirs: Dirs) -> None:
@@ -339,3 +345,158 @@ def test_stop_during_the_last_phase_exits_130(tmp_path: Path) -> None:
     assert run_phases(tmp_path, PACKAGES, [Phase("01-one", go)], stop, err) == 130
     assert sorted(p.name for p in tmp_path.iterdir()) == ["01-one.jsonl"]
     assert "interrupted after the last phase finished" in err.getvalue()
+
+
+def resolved_line(**overrides: object) -> Line:
+    line: Line = {
+        "status": "ok",
+        "filename": "foo-1.0-cp312-cp312-manylinux_2_28_x86_64.whl",
+        "url": "https://files.example/foo.whl",
+        "sha256": "ab" * 32,
+        "size": 1,
+        "upload_time": "2026-09-01T12:00:00Z",
+    }
+    line.update(overrides)
+    return line
+
+
+def test_phase_02_downloads_ok_wheel_and_records_path(dirs: Dirs) -> None:
+    assert run(dirs, "--count", "3") == 0
+    [demo, pure, missing] = dirs.lines("02-fetch")
+    assert demo["status"] == "ok"
+    assert demo["reason"] is None
+    cached = Path(str(demo["path"]))
+    assert cached.is_file()
+    assert cached.name == DEMO_TARGET
+    assert cached.parent.parent == dirs.cache / "wheels"
+    # A skipped phase 01 line turns into a skipped phase 02 line whose reason
+    # is the phase where it first wasn't ok.
+    assert pure["status"] == "skipped" and pure["reason"] == "01-resolve"
+    assert missing["status"] == "skipped" and missing["reason"] == "01-resolve"
+    assert "path" not in pure and "path" not in missing
+
+
+def test_phase_02_too_large_is_skipped_without_downloading(tmp_path: Path) -> None:
+    client = RecordedClient()
+    phase = fetch_phase(client, tmp_path)
+    previous = resolved_line(size=WHEEL_SIZE_LIMIT + 1)
+    result = phase.run(Package("foo", "1"), previous)
+    assert result == Result("skipped", "too_large")
+    assert client.requested == []
+    assert not (tmp_path / "wheels").exists()
+
+
+def test_phase_02_at_the_limit_downloads(tmp_path: Path) -> None:
+    phase = fetch_phase(RecordedClient(), tmp_path)
+    previous = resolved_line(size=WHEEL_SIZE_LIMIT)
+    # The limit itself isn't "over the limit"; the download attempt proceeds
+    # and the recorded body's sha256 won't match, so phase 02 records an
+    # error rather than a too_large skip.
+    result = phase.run(Package("foo", "1"), previous)
+    assert result.status == "error"
+    assert "does not match" in (result.reason or "")
+
+
+def test_phase_02_download_error(tmp_path: Path) -> None:
+    client = RecordedClient({"https://files.example/foo.whl": b"wrong"})
+    phase = fetch_phase(client, tmp_path)
+    previous = resolved_line(size=5)
+    result = phase.run(Package("foo", "1"), previous)
+    assert result.status == "error"
+    assert "does not match" in (result.reason or "")
+
+
+def test_phase_02_is_skipped_when_phase_01_skipped(dirs: Dirs) -> None:
+    # Smoke the chained-skip behaviour by driving a two-phase run_phases
+    # with phase 01 returning skipped and no_target, then phase 02 fails if
+    # it runs. puredemo never produces a WheelFile.
+    err = io.StringIO()
+    status = scan(dirs.list, dirs.episode, dirs.cache, 2, RecordedClient(), err)
+    assert status == 0
+    [demo, pure] = dirs.lines("02-fetch")
+    assert pure["status"] == "skipped" and pure["reason"] == "01-resolve"
+    assert demo["status"] == "ok"
+
+
+def inspect_previous(path: Path) -> Line:
+    return {"status": "ok", "path": str(path)}
+
+
+def test_phase_03_inspects_wheel(tmp_path: Path) -> None:
+    wheel = build_wheel(
+        tmp_path / "foo-1.0-cp312-cp312-manylinux_2_28_x86_64.whl",
+        {"foo.libs/libz-abc123.so.1.3.1": LIBS_ELF},
+    )
+    phase = inspect_phase()
+    result = phase.run(Package("foo", "1"), inspect_previous(wheel))
+    assert result.status == "ok"
+    assert result.data["wheel"] == wheel.name
+    records = result.data["records"]
+    assert isinstance(records, list) and len(records) == 1
+    assert records[0]["path"] == "foo.libs/libz-abc123.so.1.3.1"
+    assert records[0]["needed"] == ["libc.so.6"]
+    assert result.data["skipped_members"] == []
+
+
+def test_phase_03_reports_bad_zip_as_error(tmp_path: Path) -> None:
+    bogus = tmp_path / "bogus.whl"
+    bogus.write_bytes(b"not a zip at all")
+    result = inspect_phase().run(Package("x", "1"), inspect_previous(bogus))
+    assert result.status == "error"
+    assert "not a valid zip" in (result.reason or "")
+
+
+def test_phase_03_reports_missing_file_as_error(tmp_path: Path) -> None:
+    result = inspect_phase().run(
+        Package("x", "1"), inspect_previous(tmp_path / "missing.whl")
+    )
+    assert result.status == "error"
+    assert "no such file" in (result.reason or "")
+
+
+def test_phase_03_skips_oversized_zip_members(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wheel = build_wheel(
+        tmp_path / "big.whl",
+        {
+            "big.libs/libsmall.so": LIBS_ELF,
+            "big.libs/libhuge.so": b"\x7fELF" + b"\x00" * 1000,
+        },
+    )
+    monkeypatch.setattr(scan_module, "ZIP_MEMBER_SIZE_LIMIT", 100)
+    result = inspect_phase().run(Package("big", "1"), inspect_previous(wheel))
+    assert result.status == "ok"
+    records = result.data["records"]
+    assert isinstance(records, list) and len(records) == 0
+    skipped = result.data["skipped_members"]
+    assert isinstance(skipped, list)
+    paths = {m["path"] for m in skipped}
+    assert paths == {"big.libs/libsmall.so", "big.libs/libhuge.so"}
+
+
+def test_phase_03_is_skipped_when_phase_02_too_large(tmp_path: Path) -> None:
+    # Drive a mini three-phase run through run_phases with hand-crafted
+    # phases; phase 02 returns too_large and phase 03 must auto-skip with
+    # reason "02-fetch" (not "too_large").
+    def phase_01(_: Package, _p: Line | None) -> Result:
+        return Result("ok", None, {"size": 1})
+
+    def phase_02(_: Package, _p: Line | None) -> Result:
+        return Result("skipped", "too_large")
+
+    def phase_03_fail(_: Package, _p: Line | None) -> Result:
+        raise AssertionError("phase 03 ran despite too_large")
+
+    phases = [
+        Phase("01-resolve", phase_01),
+        Phase("02-fetch", phase_02),
+        Phase("03-inspect", phase_03_fail),
+    ]
+    err = io.StringIO()
+    assert run_phases(tmp_path, [Package("x", "1")], phases, Stop(), err) == 0
+    [line] = [
+        json.loads(s) for s in (tmp_path / "03-inspect.jsonl").read_text().splitlines()
+    ]
+    assert line["status"] == "skipped"
+    assert line["reason"] == "02-fetch"

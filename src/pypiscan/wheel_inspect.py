@@ -4,6 +4,7 @@ import hashlib
 import io
 import zipfile
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
@@ -27,6 +28,14 @@ class ElfRecord(TypedDict):
     sha256: str
     in_libs_dir: bool
     needed: list[str] | None
+
+
+@dataclass(frozen=True)
+class SkippedMember:
+    """A zip member whose declared uncompressed size was over the limit."""
+
+    path: str
+    size: int
 
 
 def _needed(data: bytes) -> list[str] | None:
@@ -59,11 +68,18 @@ def _in_libs_dir(member: str) -> bool:
     return bool(sep) and top.endswith(".libs")
 
 
-def iter_elf_members(wheel: Path) -> Iterator[tuple[str, bytes]]:
+def iter_elf_members(
+    wheel: Path,
+    max_member_size: int | None = None,
+    skipped: list[SkippedMember] | None = None,
+) -> Iterator[tuple[str, bytes]]:
     """Yield ``(member path, contents)`` for each ELF member, in archive order.
 
     Each ELF member is read into memory as data; nothing is written to disk
-    and no member is executed. Raises ``WheelError`` if ``wheel`` can't be read.
+    and no member is executed. Raises ``WheelError`` if ``wheel`` can't be
+    read. When ``max_member_size`` is set, zip members whose declared
+    uncompressed size exceeds it are not read; their path and declared size
+    are appended to ``skipped`` instead.
     """
     if not wheel.is_file():
         raise WheelError(f"{wheel}: no such file")
@@ -71,6 +87,10 @@ def iter_elf_members(wheel: Path) -> Iterator[tuple[str, bytes]]:
         with zipfile.ZipFile(wheel) as zf:
             for info in zf.infolist():
                 if info.is_dir():
+                    continue
+                if max_member_size is not None and info.file_size > max_member_size:
+                    if skipped is not None:
+                        skipped.append(SkippedMember(info.filename, info.file_size))
                     continue
                 with zf.open(info) as f:
                     if f.read(len(ELF_MAGIC)) != ELF_MAGIC:
@@ -83,7 +103,11 @@ def iter_elf_members(wheel: Path) -> Iterator[tuple[str, bytes]]:
         raise WheelError(f"{wheel}: {exc}") from exc
 
 
-def inspect_wheel(wheel: Path) -> list[ElfRecord]:
+def inspect_wheel(
+    wheel: Path,
+    max_member_size: int | None = None,
+    skipped: list[SkippedMember] | None = None,
+) -> list[ElfRecord]:
     """Return one record per ELF member of ``wheel``, in archive order."""
     return [
         {
@@ -95,5 +119,5 @@ def inspect_wheel(wheel: Path) -> list[ElfRecord]:
             "in_libs_dir": _in_libs_dir(path),
             "needed": _needed(data),
         }
-        for path, data in iter_elf_members(wheel)
+        for path, data in iter_elf_members(wheel, max_member_size, skipped)
     ]
