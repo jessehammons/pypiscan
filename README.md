@@ -1,8 +1,8 @@
 # pypiscan
 
 Inventories the compiled C libraries bundled inside PyPI wheels, identifies
-their versions from the binaries themselves, and measures how long wheels kept
-shipping library versions affected by known CVEs.
+their versions from the binaries themselves, and matches those versions
+against known CVEs.
 
 Status: early development. `inspect` works; see the [Roadmap](#roadmap) for
 what is being built and in what order.
@@ -31,16 +31,21 @@ In scope:
 
 - Linux x86_64 (manylinux) wheels for one Python version (CPython 3.12).
 - A committed list of packages, so every run uses the same pinned input.
-- An inventory of *every* bundled shared library in those wheels.
+- The latest release of each listed package, and the shared libraries
+  auditwheel bundles into its `<package>.libs/` directory.
 - Version detection for a growing list of libraries, starting with zlib and
   zlib-ng, libpng, libjpeg-turbo, libtiff, libwebp, OpenSSL, expat and
   sqlite. The order of additions is set by how often each library appears in
-  the scanned wheels (roadmap item 3.5).
+  the scanned wheels (roadmap item 3.5), and a library is added as rows in
+  the [library map](#the-library-map).
 - A curated CVE table covering high and critical CVEs from 2020 onward for
   those libraries.
-- A time-to-patch pilot for libwebp CVE-2023-4863.
 
-Out of scope for version 1: macOS, Windows, ARM and musl wheels; source
+Out of scope for version 1, and listed under [Later](#later-tbd):
+statically linked libraries, and time-to-patch (how long wheels kept
+shipping an affected version).
+
+Also out of scope for version 1: macOS, Windows, ARM and musl wheels; source
 distributions; conda packages; automated disclosure; automated parsing of
 packages' build scripts (they are read by hand during triage).
 
@@ -112,16 +117,17 @@ Rules for detectors:
   version from inside them. A pattern for a bare version number also matches
   header strings and unrelated data.
 - Candidate patterns come from discovery across real wheels (roadmap 2.3
-  and 3.5): version-like strings grouped by the text around them. Upstream
+  and 3.5): version-like strings grouped by the text around them, and the
+  library map's identity strings. Upstream
   source then confirms each candidate: which file defines it, and whether
   it is a library string or a header string.
 - Each pattern cites the upstream source file that defines its string, at a
   release tag. Patterns come from reading upstream source, not from memory.
 - Each pattern is tested against its string at *every* upstream release tag,
   from a committed fixture generated from the upstream repository (roadmap
-  2.2). Reading one release isn't enough: before 2.1.0, zlib-ng named and
-  worded its identity string differently, and a pattern written from 2.3.3
-  alone missed it.
+  2.2; from 4.1 on, by `scan`'s phase 06). Reading one release isn't enough:
+  before 2.1.0, zlib-ng named and worded its identity string differently, and
+  a pattern written from 2.3.3 alone missed it.
 - Versions are kept exactly as the string gives them, including four-part
   versions such as zlib 1.3.1.1.
 - Some libraries have derivatives that carry their strings (zlib-ng for
@@ -153,12 +159,21 @@ not "not present".
 ## How a scan runs
 
 `scan` runs every package on a committed list through a fixed sequence of
-phases, finishing each phase for all packages before starting the next. It
-covers breadth: the latest release of many packages. Depth, every release of
-one package, belongs to the time-to-patch items (section 7).
+phases, finishing each phase before starting the next. It covers breadth:
+the latest release of many packages, and only the shared libraries bundled
+in their `<package>.libs/` directories. Statically linked libraries and
+time-to-patch are [Later](#later-tbd).
+
+A scan runs in two parts with a manual step between them. Part 1 finds the
+bundled libraries; the maintainer then says, in the
+[library map](#the-library-map), which upstream project each one comes
+from; part 2 builds recognizers from those projects' release tags and
+matches the versions it finds against CVEs. The same command runs both
+parts: a rerun skips finished phases, so after the map is edited, `scan`
+picks up at phase 06.
 
 ```
-pypiscan scan <package-list> --episode-dir D --cache-dir C --count N
+pypiscan scan <package-list> --library-map M --episode-dir D --cache-dir C --count N
 ```
 
 - `--count` is required and takes the first N rows of the list: 1, 2, 5 or
@@ -167,8 +182,11 @@ pypiscan scan <package-list> --episode-dir D --cache-dir C --count N
   only the usage line, so the check is made after parsing.) A value below 1
   is an error and exits 2; a value larger than the list is clamped to its
   length.
+- `--library-map` names the committed library map, normally
+  `data/libraries.csv`.
 - The episode directory holds one run's results. The cache directory holds
-  downloaded wheels, named by sha256 and shared between episodes.
+  downloaded wheels, named by sha256, and upstream clones, both shared
+  between episodes.
 
 Each package's **target wheel** is the one pip would choose for CPython 3.12
 on manylinux x86_64 with glibc 2.28 or older. That includes `abi3` wheels
@@ -178,23 +196,89 @@ with only pure-Python wheels has no target. A target wheel larger than
 100 MB, by the size PyPI reports, is skipped as `too_large` before anything
 is downloaded.
 
-Phases, in order:
+Phases, in order. Per-package phases have one line per package; per-library
+phases have one line per library in the map.
 
-1. `01-resolve` (network): read the release from PyPI's JSON API and record
-   the target wheel's filename, URL, sha256, size and upload time.
-2. `02-fetch` (network): download the wheel into the cache, unless it is
-   already there, and verify its sha256.
-3. `03-inspect`: `inspect` records for the wheel's binaries.
-4. `04-strings`: `strings` records.
-5. `05-fingerprint`: `fingerprint` records.
-6. `06-report`: the discovery and library frequency tables (roadmap 3.5).
+Part 1:
+
+1. `01-resolve` (network, per package): read the release from PyPI's JSON
+   API and record the target wheel's filename, URL, sha256, size and
+   upload time.
+2. `02-fetch` (network, per package): download the wheel into the cache,
+   unless it is already there, and verify its sha256.
+3. `03-inspect` (per package): `inspect` records for the wheel's binaries.
+4. `04-strings` (per package): `strings` records.
+5. `05-libraries` (per package): each shared library in the wheel's
+   `.libs/` directory, with its prefix: the filename without auditwheel's
+   hash and version suffix (`libjpeg-1a2b3c4d.so.62.4.0` becomes
+   `libjpeg`). Then the phase writes the library report into the episode:
+   for each prefix, how many wheels and files carry it and its most
+   common `strings` templates. Prefixes the map doesn't list go to
+   `library-map-todo.csv` in the episode, one row each.
+
+**Manual step.** If `library-map-todo.csv` has rows, `scan` stops after
+phase 05, lists the prefixes on stderr and exits 3. The maintainer reads
+the report and, for each prefix, adds rows to the library map (or marks the
+prefix `skip`), commits the map, and reruns `scan`.
+
+Part 2:
+
+6. `06-upstream` (network, per library): clone the library's repository
+   into the cache, or update the clone, and at every release tag read each
+   identity string the map names, as a C literal. A string assembled from
+   macros is an `error` line for that library until a preprocessor step is
+   added.
+7. `07-recognizers` (per library): build a recognizer from phase 06's
+   strings and check that it reports every tag's library and version
+   (see [How versions are identified](#how-versions-are-identified)). A
+   library with any tag misidentified gets an `error` line and isn't used.
+8. `08-fingerprint` (per package): run the recognizers on each shared
+   library whose prefix maps to them, giving `fingerprint` records.
+9. `09-cves` (network, per library): candidate CVEs from NVD, by the map's
+   CPE, and OSV, by its OSV identifier, checked against the curated CVE
+   table (section 6). Fixed versions come from the release tags that
+   contain each fix commit, in phase 06's clone.
+10. `10-match` (per package): each library version that falls inside a
+    CVE's affected range, with its evidence level. A match is a candidate
+    for investigation, not a finding.
+
+### The library map
+
+`data/libraries.csv` is curated input, edited by hand and committed like
+the package list. One row per prefix, library and identity string:
+
+| prefix | library | repo | identity_file | identity_symbol | cpe | osv |
+|---|---|---|---|---|---|---|
+| `libz` | `zlib` | `https://github.com/madler/zlib` | `deflate.c` | `deflate_copyright` | `zlib:zlib` | … |
+| `libz` | `zlib` | `https://github.com/madler/zlib` | `inftrees.c` | `inflate_copyright` | `zlib:zlib` | … |
+| `libz` | `zlib-ng` | … | … | … | `zlib-ng:zlib-ng` | … |
+| `libgfortran` | `skip` | | | | | |
+
+- **prefix** is how a file is found, **library** is what it turns out to
+  be, and **cpe** and **osv** are how advisories name it. The three
+  differ: no advisory says `libz`, and zlib-ng's CVEs name zlib-ng, not
+  zlib.
+- A prefix can map to several libraries (`libz` may be zlib or zlib-ng in
+  compat mode). The prefix picks which recognizers to try; the strings in
+  the file decide which one it is.
+- A library can have several identity strings, one row each. Each must be
+  a library string, not a header string: choosing it means reading
+  upstream source, and that is what the manual step is for.
+- `skip` marks a prefix the maintainer has looked at and isn't tracking,
+  so it doesn't come back as a TODO.
+- To find a prefix's upstream, read its most common strings in the library
+  report (most libraries embed their project name and copyright), and
+  check the package's build scripts, such as Pillow's
+  `.github/dependencies.json`. If the strings fit two upstreams equally
+  well, stop and ask the maintainer.
 
 Rules:
 
 - **Pre-flight finishes before anything is written.** Any failure is
   printed to stderr and exits 2:
   1. The episode and cache directories are outside any git working tree.
-  2. The package list loads (roadmap 3.2).
+  2. The package list loads (roadmap 3.2), and so does the library map
+     (roadmap 3.5).
   3. The episode's phase files are a run of finished phases with no gaps
      (01, 02, …) and no `.partial` file. Otherwise the error names every
      file to delete.
@@ -203,13 +287,18 @@ Rules:
      run at `--count 2` and another at `--count 10` therefore need separate
      episode directories. The code version is recorded but not matched, so a
      phase can be rerun after a fix.
-- **One line per package per phase**, in list order: `schema_version`,
-  `name`, `status` (`ok`, `skipped` or `error`), `reason`, and the phase's
-  data. Per-binary results are nested inside the package's line, in the
-  `inspect`, `strings` and `fingerprint` record formats. A package whose
-  line in the previous phase isn't `ok` gets a `skipped` line, never a
-  missing one, so every finished phase file has exactly one line per
-  package. A bad zip or malformed ELF becomes an `error` line, not a crash.
+  5. The library map is expected to change between parts 1 and 2, so it
+     isn't matched from the start. Phase 06 records its sha256; if the map
+     has changed since, the error names phase 06's file and every later one
+     to delete.
+- **One line per package, or per library, per phase**, in list or map
+  order: `schema_version`, `name` or `library`, `status` (`ok`, `skipped`
+  or `error`), `reason`, and the phase's data. Per-binary results are
+  nested inside the package's line, in the `inspect`, `strings` and
+  `fingerprint` record formats. A package whose line in the previous
+  per-package phase isn't `ok` gets a `skipped` line, never a missing one,
+  so every finished phase file has exactly one line per package or
+  library. A bad zip or malformed ELF becomes an `error` line, not a crash.
 - **Phase files are written whole or not at all.** A phase writes
   `NN-<phase>.jsonl.partial` and renames it to `NN-<phase>.jsonl` when it
   finishes. A rerun skips finished phases. There is no resuming partway
@@ -222,15 +311,16 @@ Rules:
   ```
 
 - **Ctrl-C** is handled by one flag for the whole run, checked between
-  packages. The current package finishes, the `.partial` file stays, and
-  `scan` exits 130. The next run stops at pre-flight until the file is
-  deleted.
-- **One phase at a time, no retries.** An `error` line stands. Only phases 01
-  and 02 use the network, through an HTTP client that tests replace with
-  recorded responses.
+  packages and libraries. The current one finishes, the `.partial` file
+  stays, and `scan` exits 130. The next run stops at pre-flight until the
+  file is deleted.
+- **One phase at a time, no retries.** An `error` line stands. Only phases
+  01, 02, 06 and 09 use the network, through an HTTP client (or, for 06, a
+  git client) that tests replace with recorded responses or a synthetic
+  repository.
 - When every phase finishes, `scan` exits 0, even if some lines are
-  `error`: errors are data. Counts by status go to stderr, and nothing goes
-  to stdout.
+  `error`: errors are data. It exits 3 when it stops for the manual step.
+  Counts by status go to stderr, and nothing goes to stdout.
 
 ## Roadmap
 
@@ -307,14 +397,14 @@ version parsing.
   by dots), with its offset and a template in which each digit run becomes
   `#`: `deflate 1.3.2 Copyright 1995-2026 …` becomes
   `deflate #.#.# Copyright #-# …`. Offline, like `inspect`. Grouping
-  templates across many wheels is `scan`'s report phase (3.5). Manual check:
-  for lxml 6.1.3, `lxml/etree` lists zlib's `deflate` banner with that
+  templates across many wheels is `scan`'s library report (3.5). Manual
+  check: for lxml 6.1.3, `lxml/etree` lists zlib's `deflate` banner with that
   template. **← current**
 
-### 3. Breadth-first scan
+### 3. Scan, part 1: find the bundled libraries
 
-Builds `scan`, following [How a scan runs](#how-a-scan-runs). It produces
-the discovery table that section 4's detectors start from.
+Builds `scan` through the manual step, following
+[How a scan runs](#how-a-scan-runs).
 
 - **3.1** PyPI client and wheel selection, plus
   `fetch <name>==<version> --cache-dir C`: read one release from PyPI's JSON
@@ -336,36 +426,40 @@ the discovery table that section 4's detectors start from.
   pull request.
 - **3.3** `scan` with pre-flight, the episode directory and phases 01 and
   02.
-- **3.4** Phases 03 to 05. A bad zip or malformed ELF becomes an `error`
+- **3.4** Phases 03 and 04. A bad zip or malformed ELF becomes an `error`
   line; zip members over an uncompressed size limit are recorded and
   skipped.
-- **3.5** Phase 06 writes two tables into the episode directory. The
-  discovery table lists each template from `strings`: how many wheels and
-  binaries it appears in, example strings, and which detector pattern
-  explains it, if any. Unexplained templates that recur across wheels are
-  candidates for new detectors, or for variants existing ones miss. The
-  frequency table counts how often each bundled library appears across the
-  scanned wheels, and sets the order of section 4. Manual check: a full run
-  with `--count 100`; the PR includes the most frequent templates,
-  explained and unexplained, and the frequency table.
+- **3.5** Phase 05, the library map's format and loader, the library
+  report, `library-map-todo.csv` and the stop for the manual step. The
+  loader rejects missing fields, unknown columns and a prefix that is both
+  `skip` and mapped. Manual check: a full run with `--count 100`; the PR
+  includes the library report's prefixes, ordered by how many wheels carry
+  them.
+- **3.6** *(maintainer input)* The first library map: rows for the prefixes
+  in 3.5's report, most frequent first, chosen by the maintainer.
 
 Later: a per-wheel time limit, which needs a subprocess per wheel.
 
-### 4. Detectors
+### 4. Scan, part 2: recognizers
 
-- **4.1** libpng, libjpeg-turbo and libtiff detectors.
-- **4.2** OpenSSL (told apart from BoringSSL, LibreSSL and AWS-LC), expat and
-  sqlite detectors.
-- **4.3** *(maintainer input)* libwebp: it embeds no plain version string, so
+Adding a library means adding rows to the library map, not code.
+
+- **4.1** Phase 06, upstream strings. Moves the tag-walking in
+  `scripts/upstream_fixtures.py` (2.2) into `scan`, reading the library map
+  instead of the detectors' citations, and removes the script. The
+  committed `tests/upstream/*.tsv` fixtures become copies of phase 06's
+  output, so tests still check recognizers offline. Tests use a small
+  synthetic git repository.
+- **4.2** Phase 07, recognizers built from phase 06's strings and checked at
+  every tag. The hand-written zlib detector (2.1) is replaced once the
+  generated recognizers pass its fixtures, including telling zlib from
+  zlib-ng.
+- **4.3** Phase 08, fingerprint with the recognizers. Manual check: compare
+  results against Pillow 12.3.0's `.github/dependencies.json`.
+- **4.4** *(maintainer input)* libwebp: it embeds no plain version string, so
   choose a detection method before implementing it.
-- **4.4** Report binaries no detector recognized, so gaps are visible.
-
-Each detector item starts from 3.5's discovery table and ships with
-2.2-style fixtures covering every upstream release tag.
-
-Manual checks for 4.1 and 4.3 compare results against Pillow 12.3.0's
-`.github/dependencies.json`. Pillow bundles no OpenSSL, expat or sqlite, so
-4.2 needs other wheels, found with 3.5's discovery table.
+- **4.5** Report shared libraries no recognizer identified, so gaps are
+  visible.
 
 ### 5. SBOM comparison
 
@@ -379,40 +473,48 @@ Manual checks for 4.1 and 4.3 compare results against Pillow 12.3.0's
   not just conclusions: fix commits, fixed version and release date per
   maintained branch, introduced version (or "unknown"), affected component
   (library code or a bundled tool), disputed status and sources. Seeded with
-  CVE-2023-4863.
-- **6.2** Importer: draft candidate rows for one library from NVD and OSV.
-- **6.3** Range verifier: given the library's repository and a row's fix
-  commits, compute the release tags that contain them and their dates;
-  compare against the imported ranges and flag disagreements. Tests use a
-  small synthetic git repository.
+  CVE-2023-4863. Adds the `cpe` and `osv` columns to the library map.
+- **6.2** Phase 09's importer: draft candidate rows for each library from
+  NVD, by CPE, and OSV, by OSV identifier.
+- **6.3** Range verifier: given phase 06's clone and a row's fix commits,
+  compute the release tags that contain them and their dates; compare
+  against the imported ranges and flag disagreements. Tests use a small
+  synthetic git repository.
 - **6.4** *(maintainer input)* Curation review: resolve flagged rows, one
   library per pull request. Corrections to public advisories are submitted
-  upstream.
+  upstream. A bug in an original library can also be in a fork's code
+  (zlib-ng began as a fork of zlib) without any advisory naming the fork;
+  that is decided here, by reading the code, not guessed by matching.
 
-### 7. Matching and time-to-patch
+### 7. Matching
 
-- **7.1** `match`: compare fingerprints against the CVE table and output
-  candidates with their evidence level. Refuses output paths inside the
-  repository, enforced in code and tested.
+- **7.1** Phase 10, `match`: compare fingerprints against the CVE table and
+  write candidates with their evidence level into the episode, which is
+  outside the repository.
 - **7.2** Evidence for levels 2 and 3: whether the affected function is
   present in the binary, and which extension modules import functions from
   the bundled library.
-- **7.3** Release history: every release of a package, with upload times per
-  file.
-- **7.4** Historical pilot: which releases of each affected package bundled
-  which libwebp version.
-- **7.5** Time-to-patch: the clock starts when a fixed library release was
-  public (the later of the fixed release and the CVE's publication) and stops
-  at the first release whose wheel for that platform bundles a fixed version.
-  Wheels still unpatched are counted as unfinished, not dropped. Also counts
-  releases shipped with the stale library after the fix was available.
-- **7.6** Summary report as Markdown and CSV. Named examples only for
-  resolved cases.
 
 ### 8. Publishing
 
 - **8.1** Release script: a dated data snapshot plus a `SHA256SUMS` file,
   signed by the maintainer.
+
+### Later (TBD)
+
+- **Statically linked libraries.** Library code compiled into extension
+  modules rather than shipped in `.libs/`: zlib in lxml and grpcio,
+  OpenSSL in cryptography. There is no filename to start from, so
+  discovery has to work from `strings` across every binary, and header
+  strings (`compiled_against`) must not be mistaken for the library itself.
+  Much more involved than the shared-library case.
+- **Time-to-patch.** How long wheels kept shipping an affected version.
+  Needs every release of each affected package, with upload times per file
+  (depth, where `scan` is breadth). The clock starts when a fixed library
+  release was public (the later of the fixed release and the CVE's
+  publication) and stops at the first release whose wheel for that
+  platform bundles a fixed version. Wheels still unpatched are counted as
+  unfinished, not dropped. A pilot would follow libwebp CVE-2023-4863.
 
 ## Data handling and disclosure
 
