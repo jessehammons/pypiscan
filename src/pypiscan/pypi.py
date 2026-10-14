@@ -18,9 +18,17 @@ from typing import Protocol, cast
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.tags import Tag, compatible_tags, cpython_tags
-from packaging.utils import InvalidWheelFilename, parse_wheel_filename
+from packaging.utils import (
+    InvalidWheelFilename,
+    canonicalize_name,
+    parse_wheel_filename,
+)
 
 PYPI_JSON = "https://pypi.org/pypi"
+PYPI_SIMPLE = "https://pypi.org/simple"
+# PyPI's alternative to an Accept header (PEP 691). The "+" must stay as it
+# is: PyPI answers the percent-encoded form with HTML.
+SIMPLE_JSON_QUERY = "format=application/vnd.pypi.simple.v1+json"
 PYTHON_VERSION = (3, 12)
 INTERPRETER = "cp312"
 ARCH = "x86_64"
@@ -172,17 +180,30 @@ def select_target(entries: list[dict[str, object]]) -> WheelFile | None:
     return best[1] if best else None
 
 
-def release_files(
-    client: HttpClient, name: str, version: str
-) -> list[dict[str, object]]:
-    """The ``urls`` entries of one release from PyPI's JSON API."""
-    url = f"{PYPI_JSON}/{urllib.parse.quote(name)}/{urllib.parse.quote(version)}/json"
+def _json(client: HttpClient, url: str) -> dict[str, object]:
     body = b"".join(client.stream(url))
     try:
         data = json.loads(body)
     except ValueError as exc:
         raise PyPIError(f"{url}: response is not JSON") from exc
-    files = _object(data).get("urls")
+    return _object(data)
+
+
+def project_versions(client: HttpClient, name: str) -> list[str]:
+    """Every version of a project, from the Simple API's JSON form (PEP 700)."""
+    url = f"{PYPI_SIMPLE}/{canonicalize_name(name)}/?{SIMPLE_JSON_QUERY}"
+    versions = _json(client, url).get("versions")
+    if not isinstance(versions, list):
+        raise PyPIError(f"{url}: response has no 'versions' list")
+    return [v for v in cast(list[object], versions) if isinstance(v, str)]
+
+
+def release_files(
+    client: HttpClient, name: str, version: str
+) -> list[dict[str, object]]:
+    """The ``urls`` entries of one release from PyPI's JSON API."""
+    url = f"{PYPI_JSON}/{urllib.parse.quote(name)}/{urllib.parse.quote(version)}/json"
+    files = _json(client, url).get("urls")
     if not isinstance(files, list):
         raise PyPIError(f"{url}: response has no 'urls' list")
     return [_object(entry) for entry in cast(list[object], files)]
