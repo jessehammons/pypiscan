@@ -473,7 +473,7 @@ uv run python -m pypiscan scan data/smoke.csv \
   templates across many wheels is `scan`'s library report (3.7). Manual
   check: for lxml 6.1.3, `lxml/etree` lists zlib's `deflate` banner with
   that template, and rerunning the smoke episode runs only phase 04.
-- **3.6** The full package list, `data/packages.csv`. **← current** A script outside
+- **3.6** The full package list, `data/packages.csv`. A script outside
   pytest generates it: it walks a top-pypi-packages snapshot in rank order,
   keeps each project whose latest final release has a target wheel, and
   stops at 100. Most top packages are pure Python, so this goes well past
@@ -481,6 +481,7 @@ uv run python -m pypiscan scan data/smoke.csv \
   applied when scanning, so raising it doesn't mean regenerating the list.
   The snapshot month and the selection rule go in `data/README.md`.
   Versions are pinned, and refreshing the list is its own pull request.
+  **← current**
 - **3.7** Phase 05, `--library-map`, the library map's format and loader
   (pre-flight check 2), the library report, `library-map-todo.csv` and the
   stop for the manual step. The loader accepts a map with only its header
