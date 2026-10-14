@@ -362,7 +362,9 @@ the package list. One row per prefix, library and way of identifying it:
   which one it is.
 - **repo** is where the library's source is, and **tags** how its release
   tags are named, with `{version}` where the version is (`v{version}`,
-  `openssl-{version}`). **repo** is required on every mapped row, since
+  `openssl-{version}`). A non-empty **tags** has exactly one `{version}`
+  and no other placeholder, so a typo can't leave phase 06 matching no
+  tags and checking nothing. **repo** is required on every mapped row, since
   phase 06 clones every library. **tags** is required on a row with an
   **identity**, and may otherwise stay empty until the range verifier
   (6.3) requires it. Rows for one library agree on **repo**, **tags**,
@@ -610,24 +612,26 @@ uv run python -m pypiscan scan data/smoke.csv \
   200-character template cut. Manual check: a full run of
   `data/packages.csv` with `--count 100`; the PR includes the library
   report's prefixes, ordered by how many wheels carry them.
-- **3.8** The library map's patterns, and the first map. The loader takes
+- **3.8** ✓ The library map's patterns, and the first map. The loader takes
   the columns in [The library map](#the-library-map): it adds **tags** and
   **pattern**, accepts a mapped row with no kind (identified, no
   recognizer) and makes **identity** optional. It rejects a pattern
   without exactly one `{version}` or with any other placeholder than
   `{any}`, a `bare_version` pattern other than `{version}`, an identity
   without **identity_file** or **tags**, a library with both recognizer
-  rows and a no-recognizer row under one prefix, and rows for one library
-  that disagree on **repo**, **tags**, **cpe** or **osv**. Patterns compile
-  to whole-string matchers, with the bare-version shape. `data/libraries.csv`
-  gets a row for every prefix in 3.7's report, as the maintainer chose
-  them, and `tests/recognizer_examples.tsv` the strings each recognizer
-  row must match, taken from the full run's episode, plus strings that
-  must not match: libtiff's deprecation message (`Since libtiff 4.5.1, …`),
-  `1.3.1.zlib-ng` in libpng16 and `001.000` in libharfbuzz. Tests check
-  every recognizer row against its examples. Manual check: rerunning 3.7's
+  rows and a no-recognizer row under one prefix, rows for one library
+  that disagree on **repo**, **tags**, **cpe** or **osv**, and a non-empty
+  **tags** without exactly one `{version}` or with any other placeholder,
+  so a typo can't make phase 06 match no tags and check nothing. Patterns
+  compile to whole-string matchers, with the bare-version shape.
+  `data/libraries.csv` gets a row for every prefix in 3.7's report, as the
+  maintainer chose them, and `tests/recognizer_examples.tsv` the strings
+  each recognizer row must match, taken from the full run's episode, plus
+  strings that must not match: libtiff's deprecation message
+  (`Since libtiff 4.5.1, …`), `1.3.1.zlib-ng` in libpng16 and `001.000` in
+  libharfbuzz. Tests check every recognizer row against its examples. Manual check: rerunning 3.7's
   full episode with the new map writes an empty `library-map-todo.csv`,
-  and `scan` exits 0. **← current**
+  and `scan` exits 0.
 
 Later: a per-wheel time limit, which needs a subprocess per wheel.
 
@@ -646,7 +650,7 @@ Adding a library means adding rows to the library map, not code.
   command, replacing the script's dulwich code, as described in
   [Conventions](#conventions). This item adds that convention's test
   guard and its ruff exception, the one the maintainer has approved; the
-  PR still calls the exception out.
+  PR still calls the exception out. **← current**
 - **4.2** Phase 07, recognizers built from the library map's patterns, with
   those that have an identity checked against phase 06's literals at every
   tag. The hand-written zlib detector (2.1) is replaced once the generated

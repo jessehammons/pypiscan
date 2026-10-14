@@ -285,6 +285,6 @@ def test_todo_lists_unmapped_prefixes_in_report_order(tmp_path: Path) -> None:
     write_todo(path, ["libpng16", "libjpeg"])
     with path.open(newline="") as f:
         rows = list(csv.reader(f))
-    assert rows == [COLUMNS, ["libpng16", *[""] * 7], ["libjpeg", *[""] * 7]]
+    assert rows == [COLUMNS, ["libpng16", *[""] * 9], ["libjpeg", *[""] * 9]]
     write_todo(path, [])
     assert path.read_text() == ",".join(COLUMNS) + "\n"
