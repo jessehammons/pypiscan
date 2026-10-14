@@ -1,0 +1,247 @@
+{
+  "info": {
+    "name": "demo",
+    "version": "1.0",
+    "requires_python": ">=3.9",
+    "summary": "Hand-written fixture for demo.",
+    "yanked": false,
+    "yanked_reason": null,
+    "package_url": "https://pypi.org/project/demo/",
+    "release_url": "https://pypi.org/project/demo/1.0/"
+  },
+  "last_serial": 12345678,
+  "urls": [
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "2647983dc5e7c3721a497ceb27b26a2e1d24685524786f2b07fab853e40583ae",
+        "md5": "b1b8bd26cd7aefac8186482d437db1f6",
+        "sha256": "8e9cc65536ac9a34e457a74616ca408e34f7d9e72101fa38f64ee468033fbcec"
+      },
+      "downloads": -1,
+      "filename": "demo-1.0.tar.gz",
+      "has_sig": false,
+      "md5_digest": "b1b8bd26cd7aefac8186482d437db1f6",
+      "packagetype": "sdist",
+      "python_version": "source",
+      "requires_python": ">=3.9",
+      "size": 31,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/8e/9c/c65536ac9a34e457a74616ca408e34f7d9e72101fa38f64ee468033fbcec/demo-1.0.tar.gz",
+      "yanked": false,
+      "yanked_reason": null
+    },
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "f03ae7db24e4fbae2a11ea8a29322c2347d5a6d96a8f09a62ca01049cce7c8b3",
+        "md5": "e8c3bf6b938c5316ebeb13ba0797a49b",
+        "sha256": "fef10304056d7c9d8e79e325374238c06a754ec5add962c57ab00beadaaecfec"
+      },
+      "downloads": -1,
+      "filename": "demo-1.0-py3-none-any.whl",
+      "has_sig": false,
+      "md5_digest": "e8c3bf6b938c5316ebeb13ba0797a49b",
+      "packagetype": "bdist_wheel",
+      "python_version": "py3",
+      "requires_python": ">=3.9",
+      "size": 41,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/fe/f1/0304056d7c9d8e79e325374238c06a754ec5add962c57ab00beadaaecfec/demo-1.0-py3-none-any.whl",
+      "yanked": false,
+      "yanked_reason": null
+    },
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "67309207061af988210aa1be476ba42f5d87c088b785242998e667e1ef3de826",
+        "md5": "58b9a0f44a84eca1bdc2b301e7d4a9e0",
+        "sha256": "ead8e09f2c471a6824f5295b207bd60dcefab789f0f68a37dd44407854bafc22"
+      },
+      "downloads": -1,
+      "filename": "demo-1.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "has_sig": false,
+      "md5_digest": "58b9a0f44a84eca1bdc2b301e7d4a9e0",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp312",
+      "requires_python": ">=3.9",
+      "size": 83,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/ea/d8/e09f2c471a6824f5295b207bd60dcefab789f0f68a37dd44407854bafc22/demo-1.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "yanked": false,
+      "yanked_reason": null
+    },
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "2224d1ab8ee6be7bc5be926ec181cade8de0e1bf876488f429c8be751ee2db96",
+        "md5": "e726e220e1274db860e652e32b2ce404",
+        "sha256": "d2465f6dfb1943f769ef07c33b347c6b91bbbaa31582d3f26123665511dfa880"
+      },
+      "downloads": -1,
+      "filename": "demo-1.0-cp312-cp312-manylinux_2_28_x86_64.whl",
+      "has_sig": false,
+      "md5_digest": "e726e220e1274db860e652e32b2ce404",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp312",
+      "requires_python": ">=3.9",
+      "size": 62,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/d2/46/5f6dfb1943f769ef07c33b347c6b91bbbaa31582d3f26123665511dfa880/demo-1.0-cp312-cp312-manylinux_2_28_x86_64.whl",
+      "yanked": false,
+      "yanked_reason": null
+    },
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "5b773abe168aff321928420ec30a8adb04d0bcef46624b6413402304f9f1edce",
+        "md5": "b3eaf7202974fb2c71d541ec55e023fc",
+        "sha256": "32af3f419d5e1524c9b6fc56699d9b3f2152f800a3dfd85d5f043016599ae958"
+      },
+      "downloads": -1,
+      "filename": "demo-1.0-2-cp312-cp312-manylinux_2_28_x86_64.whl",
+      "has_sig": false,
+      "md5_digest": "b3eaf7202974fb2c71d541ec55e023fc",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp312",
+      "requires_python": ">=3.9",
+      "size": 64,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/32/af/3f419d5e1524c9b6fc56699d9b3f2152f800a3dfd85d5f043016599ae958/demo-1.0-2-cp312-cp312-manylinux_2_28_x86_64.whl",
+      "yanked": true,
+      "yanked_reason": "broken build"
+    },
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "f5ad6004547b4ae4bc58f17ccca219a31da4485648304c2a1116c8d1f9f1d83d",
+        "md5": "7050ccc696ffa7d0b31592aa85a058c9",
+        "sha256": "2e96ff88c6cbf094fa609e567459b3b96d270d8a611181e9a4fb63d4385c4637"
+      },
+      "downloads": -1,
+      "filename": "demo-1.0-cp312-cp312-manylinux_2_34_x86_64.whl",
+      "has_sig": false,
+      "md5_digest": "7050ccc696ffa7d0b31592aa85a058c9",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp312",
+      "requires_python": ">=3.9",
+      "size": 62,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/2e/96/ff88c6cbf094fa609e567459b3b96d270d8a611181e9a4fb63d4385c4637/demo-1.0-cp312-cp312-manylinux_2_34_x86_64.whl",
+      "yanked": false,
+      "yanked_reason": null
+    },
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "c54877741d7956e2f9f83055ce699fece742757e44bd40038e30d4388b144328",
+        "md5": "b6cc03d0dae2ac2741d76d836e5bd980",
+        "sha256": "f71f214987d27ae21054aa53514c45bc80aaa0bfa8504367c91ad94b27299145"
+      },
+      "downloads": -1,
+      "filename": "demo-1.0-cp312-cp312-musllinux_1_2_x86_64.whl",
+      "has_sig": false,
+      "md5_digest": "b6cc03d0dae2ac2741d76d836e5bd980",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp312",
+      "requires_python": ">=3.9",
+      "size": 61,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/f7/1f/214987d27ae21054aa53514c45bc80aaa0bfa8504367c91ad94b27299145/demo-1.0-cp312-cp312-musllinux_1_2_x86_64.whl",
+      "yanked": false,
+      "yanked_reason": null
+    },
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "06b5f610a69be0a29df33af77035d7b480331430e1543f9e4d74b348079ad357",
+        "md5": "9b25c5dd6ef61f5104d03d13b9878b39",
+        "sha256": "87bdb502b3a8542abf6cdb8502bb95d9b71189d77eb68e7c9a813997a81815d2"
+      },
+      "downloads": -1,
+      "filename": "demo-1.0-cp312-cp312-manylinux_2_28_aarch64.whl",
+      "has_sig": false,
+      "md5_digest": "9b25c5dd6ef61f5104d03d13b9878b39",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp312",
+      "requires_python": ">=3.9",
+      "size": 63,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/87/bd/b502b3a8542abf6cdb8502bb95d9b71189d77eb68e7c9a813997a81815d2/demo-1.0-cp312-cp312-manylinux_2_28_aarch64.whl",
+      "yanked": false,
+      "yanked_reason": null
+    },
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "a5ce0d172f3222ec2efb6a3333754f5406de7f98bb247cfa2902cf3fa24d9d7e",
+        "md5": "a83e9632921a5436bd9be380aee5b2f4",
+        "sha256": "60337136cdd15871cbd9c9ba5a61094e6f63221d926ba97ddae48e5de4f14d47"
+      },
+      "downloads": -1,
+      "filename": "demo-1.0-cp312-cp312-macosx_11_0_arm64.whl",
+      "has_sig": false,
+      "md5_digest": "a83e9632921a5436bd9be380aee5b2f4",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp312",
+      "requires_python": ">=3.9",
+      "size": 58,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/60/33/7136cdd15871cbd9c9ba5a61094e6f63221d926ba97ddae48e5de4f14d47/demo-1.0-cp312-cp312-macosx_11_0_arm64.whl",
+      "yanked": false,
+      "yanked_reason": null
+    },
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "b05f1f7c85449faf7a641f3831d6a3061675802d000929e0dd8a58c4d0563e47",
+        "md5": "3bfcaa16765837c4a7c1741aa9dea750",
+        "sha256": "e298845900acb8e38c7ff9b0807bb218b6bcf856c3555250feb6d3c52388ab0b"
+      },
+      "downloads": -1,
+      "filename": "demo-1.0-cp312-cp312-win_amd64.whl",
+      "has_sig": false,
+      "md5_digest": "3bfcaa16765837c4a7c1741aa9dea750",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp312",
+      "requires_python": ">=3.9",
+      "size": 50,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/e2/98/845900acb8e38c7ff9b0807bb218b6bcf856c3555250feb6d3c52388ab0b/demo-1.0-cp312-cp312-win_amd64.whl",
+      "yanked": false,
+      "yanked_reason": null
+    },
+    {
+      "comment_text": null,
+      "digests": {
+        "blake2b_256": "81b6f45ae169b21e9d299578adb73c2f5a3e5d8dfcabb56e01f4eaefd4efef60",
+        "md5": "bbc35f751e9916fa9fea3b77c725cf32",
+        "sha256": "ddb89013d1c1ef5742480a8ef791c8ffb439148601832c26292bf163d3be4e31"
+      },
+      "downloads": -1,
+      "filename": "demo-1.0-cp313-cp313-manylinux_2_28_x86_64.whl",
+      "has_sig": false,
+      "md5_digest": "bbc35f751e9916fa9fea3b77c725cf32",
+      "packagetype": "bdist_wheel",
+      "python_version": "cp313",
+      "requires_python": ">=3.9",
+      "size": 62,
+      "upload_time": "2026-09-01T12:00:00",
+      "upload_time_iso_8601": "2026-09-01T12:00:00.123456Z",
+      "url": "https://files.pythonhosted.org/packages/dd/b8/9013d1c1ef5742480a8ef791c8ffb439148601832c26292bf163d3be4e31/demo-1.0-cp313-cp313-manylinux_2_28_x86_64.whl",
+      "yanked": false,
+      "yanked_reason": null
+    }
+  ],
+  "vulnerabilities": []
+}

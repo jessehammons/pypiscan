@@ -186,8 +186,10 @@ pypiscan scan <package-list> --library-map M --episode-dir D --cache-dir C --cou
   `data/libraries.csv`. It arrives with phase 05 (roadmap 3.7); until then
   `scan` doesn't take it.
 - The episode directory holds one run's results. The cache directory holds
-  downloaded wheels, named by sha256, and upstream clones, both shared
-  between episodes.
+  downloaded wheels and upstream clones, both shared between episodes. A
+  wheel is stored as `wheels/<sha256>/<filename>`: a directory named by
+  its sha256, holding the file under its original name. It is written as
+  `<filename>.partial` and renamed only once its sha256 matches PyPI's.
 
 Each package's **target wheel** is the one pip would choose for CPython 3.12
 on manylinux x86_64 with glibc 2.28 or older. That includes `abi3` wheels
@@ -424,12 +426,12 @@ uv run python -m pypiscan scan data/smoke.csv \
   --cache-dir ~/pypiscan/cache --count 4
 ```
 
-- **3.1** PyPI client and wheel selection, plus
+- **3.1** ✓ PyPI client and wheel selection, plus
   `fetch <name>==<version> --cache-dir C`: read one release from PyPI's JSON
   API, choose its target wheel, download it into the cache and verify its
   sha256. Tests use recorded responses. Manual check: for five packages, the
   chosen file matches what `uvx pip download` picks with the flags in
-  [Conventions](#conventions). **← current**
+  [Conventions](#conventions).
 - **3.2** The package list format and loader, and the smoke list. A package
   list is a CSV file with columns `name` and `version`, at most 100 rows, in
   processing order. The loader rejects an empty list, more than 100 rows,
@@ -442,7 +444,7 @@ uv run python -m pypiscan scan data/smoke.csv \
   whose target wheel is over the wheel size limit (`too_large`). Each row
   pins the package's latest final release when the list is written.
   `data/README.md` says why each row is there. Manual check: every row's
-  release exists on PyPI.
+  release exists on PyPI. **← current**
 - **3.3** `scan`'s first runnable version: the command-line rules,
   pre-flight checks 1 to 4 without the library map, `episode.json`, and
   the phase runner
