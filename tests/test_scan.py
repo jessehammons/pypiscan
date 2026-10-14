@@ -617,7 +617,9 @@ def test_missing_library_map_is_a_usage_error(
 def test_bad_library_map_fails_preflight(
     dirs: Dirs, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    dirs.map.write_text(",".join(COLUMNS) + "\nlibz,zlib,header_string,r,f,i,,\n")
+    dirs.map.write_text(
+        ",".join(COLUMNS) + "\nlibz,zlib,r,,header_string,{version},f,,,\n"
+    )
     assert run(dirs, "--count", "1") == 2
     assert f"{dirs.map}:2: unknown kind 'header_string'" in capsys.readouterr().err
     assert not dirs.episode.exists()
@@ -771,7 +773,7 @@ def test_scan_stops_for_the_manual_step(
     assert missing["status"] == "skipped" and missing["reason"] == "01-resolve"
     todo = dirs.episode / "library-map-todo.csv"
     header = ",".join(COLUMNS)
-    assert todo.read_text() == f"{header}\nlibpng16,,,,,,,\nlibgfortran,,,,,,,\n"
+    assert todo.read_text() == f"{header}\nlibpng16,,,,,,,,,\nlibgfortran,,,,,,,,,\n"
     text = (dirs.episode / "library-report.md").read_text()
     assert "1. ` libpng16 `: 2 wheels, 2 files\n2. ` libgfortran `: 1 wheel" in text
     assert "2 wheels, 2 files: demo, puredemo" in text
@@ -787,14 +789,17 @@ def test_scan_stops_for_the_manual_step(
     assert (dirs.episode / "library-report.md").read_bytes() == report_before
 
     # Mapping one prefix leaves the other.
-    png = "libpng16,libpng,library_string,https://github.com/pnggroup/libpng,png.c,PNG_HEADER_VERSION_STRING,,"
+    png = (
+        "libpng16,libpng,https://github.com/pnggroup/libpng,,library_string,"
+        "libpng version {version},png.c,,,"
+    )
     dirs.map.write_text(f"{header}\n{png}\n")
     assert run(dirs, "--count", "3") == 3
     assert "\n  libgfortran\n" in capsys.readouterr().err
-    assert todo.read_text() == f"{header}\nlibgfortran,,,,,,,\n"
+    assert todo.read_text() == f"{header}\nlibgfortran,,,,,,,,,\n"
 
     # Once every prefix is listed, the todo is empty and scan exits 0.
-    dirs.map.write_text(f"{header}\n{png}\nlibgfortran,skip,,,,,,\n")
+    dirs.map.write_text(f"{header}\n{png}\nlibgfortran,skip,,,,,,,,\n")
     assert run(dirs, "--count", "3") == 0
     assert "library-map-todo" not in capsys.readouterr().err
     assert todo.read_text() == f"{header}\n"

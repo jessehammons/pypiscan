@@ -610,7 +610,7 @@ uv run python -m pypiscan scan data/smoke.csv \
   200-character template cut. Manual check: a full run of
   `data/packages.csv` with `--count 100`; the PR includes the library
   report's prefixes, ordered by how many wheels carry them.
-- **3.8** The library map's patterns, and the first map. The loader takes
+- **3.8** ✓ The library map's patterns, and the first map. The loader takes
   the columns in [The library map](#the-library-map): it adds **tags** and
   **pattern**, accepts a mapped row with no kind (identified, no
   recognizer) and makes **identity** optional. It rejects a pattern
@@ -627,7 +627,7 @@ uv run python -m pypiscan scan data/smoke.csv \
   `1.3.1.zlib-ng` in libpng16 and `001.000` in libharfbuzz. Tests check
   every recognizer row against its examples. Manual check: rerunning 3.7's
   full episode with the new map writes an empty `library-map-todo.csv`,
-  and `scan` exits 0. **← current**
+  and `scan` exits 0.
 
 Later: a per-wheel time limit, which needs a subprocess per wheel.
 
@@ -646,7 +646,7 @@ Adding a library means adding rows to the library map, not code.
   command, replacing the script's dulwich code, as described in
   [Conventions](#conventions). This item adds that convention's test
   guard and its ruff exception, the one the maintainer has approved; the
-  PR still calls the exception out.
+  PR still calls the exception out. **← current**
 - **4.2** Phase 07, recognizers built from the library map's patterns, with
   those that have an identity checked against phase 06's literals at every
   tag. The hand-written zlib detector (2.1) is replaced once the generated
