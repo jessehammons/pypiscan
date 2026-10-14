@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TextIO, cast
 
+from pypiscan.fetch import download
 from pypiscan.package_list import Package, PackageListError, load_package_list
 from pypiscan.pypi import (
     ARCH,
@@ -24,8 +25,14 @@ from pypiscan.pypi import (
     MAX_GLIBC_MINOR,
     HttpClient,
     PyPIError,
+    WheelFile,
     release_files,
     select_target,
+)
+from pypiscan.wheel_inspect import (
+    SkippedMember,
+    WheelError,
+    inspect_wheel,
 )
 
 SCHEMA_VERSION = 1
@@ -80,8 +87,65 @@ def resolve_phase(client: HttpClient) -> Phase:
     return Phase("01-resolve", run)
 
 
-def phases(client: HttpClient) -> list[Phase]:
-    return [resolve_phase(client)]
+def fetch_phase(client: HttpClient, cache_dir: Path) -> Phase:
+    """Phase 02: download each wheel into the cache, verifying its sha256.
+
+    Builds the ``WheelFile`` from phase 01's line instead of calling PyPI
+    again. A wheel whose reported size is over the wheel size limit is
+    recorded as ``skipped`` with reason ``too_large`` and never downloaded.
+    """
+
+    def run(package: Package, previous: Line | None) -> Result:
+        # The runner only calls phase 02 when phase 01's line is ok.
+        line = cast(Line, previous)
+        if cast(int, line["size"]) > WHEEL_SIZE_LIMIT:
+            return Result("skipped", "too_large")
+        wheel = WheelFile(
+            filename=cast(str, line["filename"]),
+            url=cast(str, line["url"]),
+            sha256=cast(str, line["sha256"]),
+            size=cast(int, line["size"]),
+            upload_time=cast(str, line["upload_time"]),
+        )
+        try:
+            path = download(client, wheel, cache_dir)
+        except PyPIError as exc:
+            return Result("error", str(exc))
+        return Result("ok", None, {"path": str(path)})
+
+    return Phase("02-fetch", run)
+
+
+def inspect_phase() -> Phase:
+    """Phase 03: ``inspect`` records for each wheel's ELF members.
+
+    Zip members whose declared uncompressed size is over the zip-member
+    limit are listed in ``skipped_members`` instead of being read.
+    """
+
+    def run(package: Package, previous: Line | None) -> Result:
+        line = cast(Line, previous)
+        wheel_path = Path(cast(str, line["path"]))
+        skipped: list[SkippedMember] = []
+        try:
+            records = inspect_wheel(wheel_path, ZIP_MEMBER_SIZE_LIMIT, skipped)
+        except WheelError as exc:
+            return Result("error", str(exc))
+        return Result(
+            "ok",
+            None,
+            {
+                "wheel": wheel_path.name,
+                "records": cast(list[object], records),
+                "skipped_members": [asdict(member) for member in skipped],
+            },
+        )
+
+    return Phase("03-inspect", run)
+
+
+def phases(client: HttpClient, cache_dir: Path) -> list[Phase]:
+    return [resolve_phase(client), fetch_phase(client, cache_dir), inspect_phase()]
 
 
 def _sha256(path: Path) -> str:
@@ -299,6 +363,6 @@ def scan(
 
     handler = signal.signal(signal.SIGINT, on_sigint)
     try:
-        return run_phases(episode, packages, phases(client), stop, err)
+        return run_phases(episode, packages, phases(client, cache), stop, err)
     finally:
         signal.signal(signal.SIGINT, handler)

@@ -181,6 +181,27 @@ def test_corrupt_member_raises(tmp_path: Path) -> None:
         inspect_wheel(whl)
 
 
+def test_corrupt_deflated_member_raises(tmp_path: Path) -> None:
+    # A deflated member whose compressed bytes are garbled raises zlib.error
+    # from f.read(), not BadZipFile. inspect_wheel must still surface a
+    # WheelError so phase 03 records it as an error line instead of crashing.
+    whl = tmp_path / "corrupt.whl"
+    with zipfile.ZipFile(whl, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("foo.libs/libz.so", LIBS_ELF)
+    raw = bytearray(whl.read_bytes())
+    # Local file header: 30 fixed bytes + file-name + extra-field, so the
+    # compressed stream starts right after.
+    sig = raw.index(b"PK\x03\x04")
+    name_len = int.from_bytes(raw[sig + 26 : sig + 28], "little")
+    extra_len = int.from_bytes(raw[sig + 28 : sig + 30], "little")
+    data_off = sig + 30 + name_len + extra_len
+    raw[data_off : data_off + 32] = b"\xff" * 32  # garbage, not valid DEFLATE
+    whl.write_bytes(bytes(raw))
+
+    with pytest.raises(WheelError, match="not a valid zip file"):
+        inspect_wheel(whl)
+
+
 def test_cli_prints_json_lines(wheel: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["inspect", str(wheel)]) == 0
 
