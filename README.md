@@ -298,7 +298,10 @@ Rules:
      list file's sha256, the count after clamping, the target and both size
      limits. A smoke run at `--count 2` and another at `--count 10`
      therefore need separate episode directories. The code version is
-     recorded but not matched, so a phase can be rerun after a fix.
+     recorded but not matched, so a phase can be rerun after a fix. If the
+     episode has phase files (finished or `.partial`) but no
+     `episode.json`, their inputs can't be checked, and the error names
+     them to delete.
   5. The library map is expected to change between parts 1 and 2, so it
      isn't matched from the start. Phase 06 records its sha256; if the map
      has changed since, the error names phase 06's file and every later one
@@ -324,8 +327,9 @@ Rules:
   ```
 
 - **Ctrl-C** is handled by one flag for the whole run, checked between
-  packages and libraries. The current one finishes, the `.partial` file
-  stays, and `scan` exits 130. The next run stops at pre-flight until the
+  packages and libraries, and between phases. The current one finishes, the
+  `.partial` file stays, and `scan` exits 130, even when the phase it
+  interrupted was the last. The next run stops at pre-flight until the
   file is deleted.
 - **One phase at a time, no retries.** An `error` line stands. Only phases
   01, 02, 06 and 09 use the network, through an HTTP client (or, for 06,

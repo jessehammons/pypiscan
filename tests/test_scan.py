@@ -297,3 +297,45 @@ def test_sigint_sets_the_stop_flag(tmp_path: Path, dirs: Dirs) -> None:
     assert stop.requested
     assert signal.getsignal(signal.SIGINT) is original
     assert (dirs.episode / "01-resolve.jsonl.partial").read_text().count("\n") == 1
+
+
+@pytest.mark.parametrize("name", ["01-resolve.jsonl", "01-resolve.jsonl.partial"])
+def test_phase_files_without_episode_json(
+    dirs: Dirs, name: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dirs.episode.mkdir()
+    (dirs.episode / name).write_text("")
+    assert run(dirs, "--count", "1") == 2
+    err = capsys.readouterr().err
+    assert "episode.json is missing" in err
+    assert f"Delete {name}, or use a separate episode directory." in err
+    assert not (dirs.episode / "episode.json").exists()
+
+
+def test_stop_between_phases_leaves_no_partial(tmp_path: Path) -> None:
+    stop = Stop()
+
+    def go(package: Package, previous: Line | None) -> Result:
+        if package.name == PACKAGES[-1].name:
+            stop.requested = True
+        return Result("ok")
+
+    err = io.StringIO()
+    phases = [Phase("01-one", go), phase("02-two")]
+    assert run_phases(tmp_path, PACKAGES, phases, stop, err) == EXIT_INTERRUPTED
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["01-one.jsonl"]
+    assert "interrupted before 02-two" in err.getvalue()
+
+
+def test_stop_during_the_last_phase_exits_130(tmp_path: Path) -> None:
+    stop = Stop()
+
+    def go(package: Package, previous: Line | None) -> Result:
+        if package.name == PACKAGES[-1].name:
+            stop.requested = True
+        return Result("ok")
+
+    err = io.StringIO()
+    assert run_phases(tmp_path, PACKAGES, [Phase("01-one", go)], stop, err) == 130
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["01-one.jsonl"]
+    assert "interrupted after the last phase finished" in err.getvalue()

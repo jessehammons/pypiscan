@@ -141,10 +141,18 @@ def episode_inputs(package_list: Path, count: int) -> Line:
 
 
 def _episode_problems(episode: Path, inputs: Line) -> list[str]:
-    """Check 4: an existing episode.json matches this run's inputs."""
+    """Check 4: episode.json matches this run's inputs, if it or phase files exist."""
     path = episode / "episode.json"
     if not path.is_file():
-        return []
+        paths: list[Path] = list(episode.iterdir()) if episode.is_dir() else []
+        names = sorted(p.name for p in paths if PHASE_FILE.fullmatch(p.name))
+        if not names:
+            return []
+        return [
+            f"{path} is missing, so the inputs of the phase files already there "
+            f"can't be checked. Delete {', '.join(names)}, or use a separate "
+            "episode directory."
+        ]
     try:
         recorded = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError) as exc:
@@ -218,6 +226,9 @@ def run_phases(
     previous: dict[str, Line] | None = None
     earlier: list[str] = []
     for phase in phase_list:
+        if stop.requested:
+            print(f"interrupted before {phase.name}", file=err)
+            return EXIT_INTERRUPTED
         done = episode / f"{phase.name}.jsonl"
         if done.is_file():
             print(f"{phase.name}: already finished, skipped", file=err)
@@ -243,6 +254,9 @@ def run_phases(
             print(f"{phase.name}: {summary}", file=err)
         previous = _read_lines(done)
         earlier.append(phase.name)
+    if stop.requested:
+        print("interrupted after the last phase finished", file=err)
+        return EXIT_INTERRUPTED
     return 0
 
 
