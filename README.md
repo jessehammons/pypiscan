@@ -188,11 +188,12 @@ Rules for recognizers:
   one C literal that a variable or macro names (zlib's `deflate_copyright`,
   bzip2's `BZ_VERSION`), the row can name it in **identity**, and the
   pattern is then also checked against that literal at every release tag
-  (phases 06 and 07). Reading one release isn't enough: before 2.1.0, zlib-ng named and
-  worded its identity string differently, and a pattern written from 2.3.3
-  alone missed it. Rows without an identity are unchecked against older
-  releases. Version 1 scans current releases only, and before anything is
-  sent to a maintainer the version is confirmed by hand.
+  (phases 06 and 07). Reading one release isn't enough: before 2.1.0,
+  zlib-ng named and worded its identity string differently, and a pattern
+  written from 2.3.3 alone missed it. Rows without an identity are
+  unchecked against older releases. Version 1 scans current releases only,
+  and before anything is sent to a maintainer the version is confirmed by
+  hand.
 - Versions are kept exactly as the string gives them, including four-part
   versions such as zlib 1.3.1.1.
 - Some libraries have derivatives that carry their strings (zlib-ng for
