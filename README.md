@@ -463,10 +463,12 @@ uv run python -m pypiscan scan data/smoke.csv \
   malformed ELF becomes an `error` line, and zip members over the
   zip-member size limit are recorded and skipped. Manual check: rerunning
   3.3's smoke episode runs only phases 02 and 03.
-- **3.5** `pypiscan strings <wheel>` and phase 04. **← current** `strings` lists, for each
-  ELF binary, every printable string that contains a version-like token
-  (digit runs separated by dots), with its offset and a template in which
-  each digit run becomes `#`: `deflate 1.3.2 Copyright 1995-2026 …` becomes
+- **3.5** ✓ `pypiscan strings <wheel>` and phase 04. `strings` lists, for
+  each ELF binary, every printable string that contains a version-like
+  token (digit runs separated by dots), with its offset, its ELF section
+  name (`null` when the offset maps to none, so `.rodata` strings can be
+  told from compiler notes in `.comment`) and a template in which each
+  digit run becomes `#`: `deflate 1.3.2 Copyright 1995-2026 …` becomes
   `deflate #.#.# Copyright #-# …`. Offline, like `inspect`. Grouping
   templates across many wheels is `scan`'s library report (3.7). Manual
   check: for lxml 6.1.3, `lxml/etree` lists zlib's `deflate` banner with
@@ -479,6 +481,7 @@ uv run python -m pypiscan scan data/smoke.csv \
   applied when scanning, so raising it doesn't mean regenerating the list.
   The snapshot month and the selection rule go in `data/README.md`.
   Versions are pinned, and refreshing the list is its own pull request.
+  **← current**
 - **3.7** Phase 05, `--library-map`, the library map's format and loader
   (pre-flight check 2), the library report, `library-map-todo.csv` and the
   stop for the manual step. The loader accepts a map with only its header

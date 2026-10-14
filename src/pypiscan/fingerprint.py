@@ -6,16 +6,13 @@ section "How versions are identified". Library-specific knowledge lives in
 """
 
 import hashlib
-import io
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Literal, TypedDict
 
-from elftools.common.exceptions import ELFError
-from elftools.elf.elffile import ELFFile
-
+from pypiscan.elf_sections import Sections, section_at, sections
 from pypiscan.wheel_inspect import iter_elf_members
 
 SCHEMA_VERSION = 1
@@ -99,27 +96,6 @@ class _Match:
     version: str | None  # None when the match must not set the version
 
 
-def _sections(data: bytes) -> list[tuple[int, int, str]]:
-    """Return ``(offset, size, name)`` for each section with file contents."""
-    try:
-        elf = ELFFile(io.BytesIO(data))
-        return [
-            (s["sh_offset"], s["sh_size"], s.name)
-            for s in elf.iter_sections()
-            if s["sh_type"] != "SHT_NOBITS" and s["sh_size"] > 0
-        ]
-    # Same pyelftools failure modes as wheel_inspect._needed.
-    except (ELFError, AssertionError, ValueError, OverflowError):
-        return []
-
-
-def _section_at(sections: list[tuple[int, int, str]], offset: int) -> str | None:
-    for start, size, name in sections:
-        if start <= offset < start + size:
-            return name
-    return None
-
-
 def _decode(raw: bytes) -> str:
     return raw.decode("ascii", "backslashreplace")
 
@@ -172,7 +148,7 @@ def fingerprint_binary(
 ) -> list[FingerprintRecord]:
     """Return one record per library detected in one binary."""
     sha256 = hashlib.sha256(data).hexdigest()
-    sections: list[tuple[int, int, str]] | None = None
+    mapped: Sections | None = None
     records: list[FingerprintRecord] = []
     for detector in detectors:
         by_library: dict[str, list[_Match]] = {}
@@ -182,8 +158,8 @@ def fingerprint_binary(
             result = _resolve(matches)
             if result is None:
                 continue
-            if sections is None:
-                sections = _sections(data)
+            if mapped is None:
+                mapped = sections(data)
             relation, version, conflict = result
             records.append(
                 {
@@ -202,7 +178,7 @@ def fingerprint_binary(
                             "offset": m.offset,
                             "section": None
                             if m.offset is None
-                            else _section_at(sections, m.offset),
+                            else section_at(mapped, m.offset),
                         }
                         for m in matches
                     ],

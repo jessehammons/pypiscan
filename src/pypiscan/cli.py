@@ -11,6 +11,7 @@ from pypiscan.package_list import check_release
 from pypiscan.pypi import HttpClient, PyPIError, UrllibClient
 from pypiscan.scan import EXIT_PREFLIGHT, scan
 from pypiscan.wheel_inspect import WheelError, inspect_wheel
+from pypiscan.wheel_strings import strings_wheel
 
 
 def _emit(command: str, produce: Callable[[], Sequence[object]]) -> int:
@@ -26,6 +27,10 @@ def _emit(command: str, produce: Callable[[], Sequence[object]]) -> int:
 
 def inspect(wheel: Path) -> int:
     return _emit("inspect", lambda: inspect_wheel(wheel))
+
+
+def strings(wheel: Path) -> int:
+    return _emit("strings", lambda: strings_wheel(wheel))
 
 
 def fingerprint(wheel: Path) -> int:
@@ -55,6 +60,11 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
         "inspect", help="List the ELF binaries in a wheel as JSON Lines."
     )
     p_inspect.add_argument("wheel", type=Path, help="Path to a .whl file.")
+    p_strings = sub.add_parser(
+        "strings",
+        help="List the version-like strings in a wheel's ELF binaries as JSON Lines.",
+    )
+    p_strings.add_argument("wheel", type=Path, help="Path to a .whl file.")
     p_fingerprint = sub.add_parser(
         "fingerprint",
         help="Identify bundled libraries and versions in a wheel as JSON Lines.",
@@ -105,6 +115,8 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
         )
     if args.command == "fetch":
         return fetch(args.release, args.cache_dir, client or UrllibClient())
+    if args.command == "strings":
+        return strings(args.wheel)
     if args.command == "fingerprint":
         return fingerprint(args.wheel)
     return inspect(args.wheel)
