@@ -12,8 +12,8 @@ from pypiscan.library_report import (
     todo,
     write_todo,
 )
-from pypiscan.noise import NOISE, usable
-from pypiscan.wheel_strings import StringRecord, template
+from pypiscan.noise import NOISE, TOKEN, only_oids, usable
+from pypiscan.wheel_strings import VERSION_TOKEN, StringRecord, template
 
 
 @pytest.mark.parametrize(
@@ -82,6 +82,44 @@ def test_every_noise_pattern_is_tested() -> None:
     assert len(NOISE) == 4
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "1.2.840.10045.2.1",
+        "2.16.840.1.101.3.4.1.42",
+        "AES-256-CBC:AES256:2.16.840.1.101.3.4.1.42",
+        "1.2.3.4.5",
+    ],
+)
+def test_strings_with_only_object_identifiers_are_noise(text: str) -> None:
+    assert only_oids(text)
+    assert not usable(string(text))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "OpenSSL 3.5.8 25 Aug 2026",
+        "zlib 1.3.1.1",
+        "127.0.0.1",
+        "ANSI X9.62",
+        "id-ecPublicKey 1.2.840.10045.2.1 in OpenSSL 3.5.8",
+    ],
+)
+def test_strings_with_a_release_like_token_are_kept(text: str) -> None:
+    assert not only_oids(text)
+    assert usable(string(text))
+
+
+def test_a_string_with_no_token_is_not_an_oid() -> None:
+    # strings never lists one, but the rule shouldn't depend on that.
+    assert not only_oids("no version here")
+
+
+def test_oid_token_matches_the_strings_token() -> None:
+    assert TOKEN.pattern == VERSION_TOKEN.pattern.decode()
+
+
 def strings_line(files: dict[str, list[StringRecord]]) -> dict[str, object]:
     return {
         "status": "ok",
@@ -125,6 +163,7 @@ def lines() -> dict[str, dict[str, dict[str, object]]]:
                     PNG_B: [
                         string("libpng version 1.6.58"),
                         string("1.6.58"),
+                        string("AES-256-CBC:AES256:2.16.840.1.101.3.4.1.42"),
                         string("libpng version 1.6.58"),
                     ],
                     JPEG_B: [],
@@ -151,15 +190,16 @@ def test_report() -> None:
             "ordered by how many wheels carry them.",
             "",
             "Templates use only strings in data sections that pass the noise "
-            "filter, cut to 200 characters, with one real example each. Up to "
-            "20 per prefix, ranked by how many wheels carry them.",
+            "filter, cut to 200 characters, with one real example each. Every "
+            "template is listed, ranked by how many wheels carry it, ties "
+            "alphabetical.",
             "",
             "## Prefixes",
             "",
             "1. ` libpng16 `: 2 wheels, 2 files",
             "2. ` libjpeg `: 1 wheel, 2 files",
             "",
-            "## 1. ` libpng16 `",
+            "## 1. ` libpng16 `: 2 templates",
             "",
             "2 wheels, 2 files: a, b",
             "",
@@ -168,7 +208,7 @@ def test_report() -> None:
             "2. 1 wheel: ` #.#.# `",
             "   - e.g. ` 1.6.58 `",
             "",
-            "## 2. ` libjpeg `",
+            "## 2. ` libjpeg `: 1 template",
             "",
             "1 wheel, 2 files: b",
             "",
@@ -188,7 +228,9 @@ def test_report_prefix_with_no_usable_strings() -> None:
     }
     text = report(["a"], data)
     assert "1 package scanned, 1 with `.libs/` shared libraries, 1 prefix," in text
-    assert text.endswith("1 wheel, 1 file: a\n\nNo usable strings.\n")
+    assert text.endswith(
+        "## 1. ` libfoo `: 0 templates\n\n1 wheel, 1 file: a\n\nNo usable strings.\n"
+    )
 
 
 def test_report_ties_order_by_files_then_name() -> None:
@@ -210,7 +252,7 @@ def test_report_ties_order_by_files_then_name() -> None:
     )
 
 
-def test_report_cuts_templates_and_keeps_twenty() -> None:
+def test_report_lists_every_template_cut_to_200_characters() -> None:
     long = "1.0 " + "x" * 300
     many = [string(f"{'a' * n} 1.0") for n in range(1, 25)]
     data = {
@@ -220,11 +262,14 @@ def test_report_cuts_templates_and_keeps_twenty() -> None:
         }
     }
     text = report(["a"], data)
-    assert "Top 20 of 25 templates:" in text
+    assert "## 1. ` libfoo `: 25 templates\n" in text
+    assert "Top " not in text
+    assert text.count("   - e.g. ") == 25
+    # The last template ranked, with ties alphabetical, is still listed.
+    assert f"25. 1 wheel: ` {'a' * 24} #.# `\n" in text
     assert f"` {template(long)[:TEMPLATE_LIMIT]} `\n" in text
     assert f"` {long[:TEMPLATE_LIMIT]} `\n" in text
     assert "x" * 201 not in text
-    assert text.count("   - e.g. ") == 20
 
 
 def test_todo_lists_unmapped_prefixes_in_report_order(tmp_path: Path) -> None:

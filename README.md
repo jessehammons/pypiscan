@@ -136,8 +136,15 @@ Exported symbols and `DT_SONAME` are not version evidence.
 Strings that can't identify a library are dropped before they are used.
 Only strings in data sections (`.rodata`, `.data` and `.data.rel.ro`)
 count, and known noise is removed: compiler and build notes (`GCC:`,
-`annobin`), symbol versions (`@GLIBC_`) and the build image's own paths
-(`/opt/_internal/`). The noise list grows as the library report shows more.
+`annobin`), symbol versions (`@GLIBC_`), the build image's own paths
+(`/opt/_internal/`) and object identifiers. A string is an object
+identifier when every version-like token in it has five or more
+dot-separated parts, such as OpenSSL's
+`AES-256-CBC:AES256:2.16.840.1.101.3.4.1.42`. Release versions almost
+never have more than four (zlib 1.3.1.1), so a string that also holds a
+token of two to four parts, such as `ANSI X9.62`, is kept. One known
+exception is dropped: numpy's `OpenBLAS 0.3.34.106.0 …`. The noise list
+grows as the library report shows more.
 `strings` output and phase 04 keep everything; the filter applies where
 strings are used, in the library report (phase 05) and in matching.
 
@@ -259,10 +266,10 @@ Part 1:
    first one cuts. A name with no hash is cut at its first `.so`. Then the
    phase writes the library report into the episode, `library-report.md`:
    prefixes ordered by how many wheels carry them, and for each, how many
-   wheels and files carry it, the packages carrying it, and up to 20 of its
-   `strings` templates ranked by how many wheels carry each one, each with
-   one real example string. The report uses only strings that pass the
-   noise filter (see
+   wheels and files carry it, the packages carrying it, and all of its
+   `strings` templates, ranked by how many wheels carry each one with ties
+   in alphabetical order, each with one real example string. The report
+   uses only strings that pass the noise filter (see
    [How versions are identified](#how-versions-are-identified)), and cuts
    templates longer than 200 characters to 200, so a long run of text
    doesn't become a template of its own.

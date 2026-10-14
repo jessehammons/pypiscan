@@ -17,7 +17,6 @@ from pypiscan.noise import usable
 from pypiscan.wheel_strings import StringRecord
 
 TEMPLATE_LIMIT = 200
-TEMPLATES_PER_PREFIX = 20
 
 # auditwheel's hash: "-" and 8 hex digits, before the extension or, in a
 # library repaired twice (numpy's libgfortran-83c28eba-468e71e5.so.5.0.0),
@@ -112,8 +111,8 @@ def report(packages: Sequence[str], lines: Mapping[str, Mapping[str, Line]]) -> 
         "",
         "Templates use only strings in data sections that pass the noise "
         f"filter, cut to {TEMPLATE_LIMIT} characters, with one real example "
-        f"each. Up to {TEMPLATES_PER_PREFIX} per prefix, ranked by how many "
-        "wheels carry them.",
+        "each. Every template is listed, ranked by how many wheels carry it, "
+        "ties alphabetical.",
         "",
         "## Prefixes",
         "",
@@ -127,7 +126,7 @@ def report(packages: Sequence[str], lines: Mapping[str, Mapping[str, Line]]) -> 
         ranked = sorted(entry.wheels, key=lambda t: (-len(entry.wheels[t]), t))
         out += [
             "",
-            f"## {i}. {_code(entry.name)}",
+            f"## {i}. {_code(entry.name)}: {_count(len(ranked), 'template')}",
             "",
             f"{_count(len(entry.packages), 'wheel')}, "
             f"{_count(entry.files, 'file')}: {', '.join(entry.packages)}",
@@ -135,9 +134,7 @@ def report(packages: Sequence[str], lines: Mapping[str, Mapping[str, Line]]) -> 
         ]
         if not ranked:
             out.append("No usable strings.")
-        elif len(ranked) > TEMPLATES_PER_PREFIX:
-            out += [f"Top {TEMPLATES_PER_PREFIX} of {len(ranked)} templates:", ""]
-        for j, template in enumerate(ranked[:TEMPLATES_PER_PREFIX], 1):
+        for j, template in enumerate(ranked, 1):
             wheels = _count(len(entry.wheels[template]), "wheel")
             out += [
                 f"{j}. {wheels}: {_code(template)}",
