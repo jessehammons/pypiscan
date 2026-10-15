@@ -99,14 +99,19 @@ class Phase[T: Named]:
     """A per-package or per-library phase.
 
     ``run`` gets each item and its lines from every earlier phase of its
-    kind, keyed by phase name. It is only called when the previous phase's
-    line is ok. ``finish``, if set, gets every item's lines, this phase's
-    included, once every item is done and before the phase file is finished.
+    kind, keyed by phase name. With ``skip_not_ok`` set, as for per-package
+    phases, ``run`` is only called when the previous phase's line is ok, and
+    an item whose line isn't gets a ``skipped`` line instead. Per-library
+    phases clear it and run every library; one that needs an earlier
+    phase's result reads that line itself. ``finish``, if set, gets every
+    item's lines, this phase's included, once every item is done and before
+    the phase file is finished.
     """
 
     name: str
     run: Callable[[T, Mapping[str, Line]], Result]
     finish: Callable[[Sequence[str], Lines], None] | None = None
+    skip_not_ok: bool = True
 
 
 def resolve_phase(client: HttpClient) -> Phase[Package]:
@@ -291,13 +296,44 @@ def upstream_phase(
         recorded["library_map_sha256"] = map_sha256
         write_json(record, recorded)
 
-    return Phase("06-upstream", run, finish)
+    return Phase("06-upstream", run, finish, skip_not_ok=False)
+
+
+def recognizers_phase(rows: Sequence[MapRow]) -> Phase[Library]:
+    """Phase 07: each library's recognizers, from its map rows with a kind.
+
+    Each entry holds what ``library_map.matcher`` compiles. A library with
+    no such row is ``skipped`` with reason ``no_recognizer``. Doesn't read
+    phase 06's line: recognizers come from the map, so a library whose
+    clone was skipped or failed still gets them.
+    """
+    found: dict[str, list[object]] = {}
+    for row in rows:
+        if row.kind:
+            found.setdefault(row.library, []).append(
+                {
+                    "prefix": row.prefix,
+                    "kind": row.kind,
+                    "pattern": row.pattern,
+                    "identity_file": row.identity_file or None,
+                }
+            )
+
+    def run(library: Library, earlier: Mapping[str, Line]) -> Result:
+        if library.name not in found:
+            return Result("skipped", "no_recognizer")
+        return Result("ok", None, {"recognizers": found[library.name]})
+
+    return Phase("07-recognizers", run, skip_not_ok=False)
 
 
 def library_phases(
-    cache_dir: Path, episode: Path, map_sha256: str
+    cache_dir: Path, episode: Path, map_sha256: str, rows: Sequence[MapRow]
 ) -> list[Phase[Library]]:
-    return [upstream_phase(cache_dir, episode, map_sha256, UPSTREAM_HOST)]
+    return [
+        upstream_phase(cache_dir, episode, map_sha256, UPSTREAM_HOST),
+        recognizers_phase(rows),
+    ]
 
 
 def write_json(path: Path, value: object) -> None:
@@ -450,9 +486,10 @@ def _read_lines(path: Path, key: str = "name") -> dict[str, Line]:
 def _line[T: Named](
     phase: Phase[T], item: T, earlier: dict[str, Line], key: str
 ) -> Line:
-    """Run ``phase`` for ``item``, or skip it if the previous line isn't ok."""
+    """Run ``phase`` for ``item``, or skip it if the phase skips items whose
+    previous line isn't ok and this one's isn't."""
     previous = next(reversed(earlier.values()), None)
-    if previous is not None and previous["status"] != "ok":
+    if phase.skip_not_ok and previous is not None and previous["status"] != "ok":
         reason = previous["reason"]
         # Keep the phase where the package's line first wasn't ok.
         if previous["status"] != "skipped" or reason not in earlier:
@@ -589,7 +626,7 @@ def scan(
         status = status or manual_step(episode, rows, err)
         if status:
             return status
-        part_2 = library_phases(cache, episode, _sha256(library_map))
+        part_2 = library_phases(cache, episode, _sha256(library_map), rows)
         libraries = upstream_libraries(rows)
         return run_phases(episode, libraries, part_2, stop, err, key="library")
     finally:

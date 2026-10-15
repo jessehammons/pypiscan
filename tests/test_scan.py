@@ -12,7 +12,7 @@ from git_repo import make_repo
 from pypiscan import scan as scan_module
 from pypiscan.cli import main
 from pypiscan.git import GitError, clone_or_fetch
-from pypiscan.library_map import COLUMNS, load_library_map
+from pypiscan.library_map import COLUMNS, load_library_map, matcher
 from pypiscan.package_list import Package
 from pypiscan.scan import (
     EPISODE_SCHEMA_VERSION,
@@ -31,6 +31,8 @@ from pypiscan.scan import (
     git_work_tree,
     inspect_phase,
     libraries_phase,
+    library_phases,
+    recognizers_phase,
     run_phases,
     scan,
     strings_phase,
@@ -95,9 +97,11 @@ def test_scan_runs_every_phase(dirs: Dirs, capsys: pytest.CaptureFixture[str]) -
     assert "03-inspect: 0 ok, 2 skipped, 1 error" in err
     assert "04-strings: 0 ok, 3 skipped, 0 error" in err
     assert "05-libraries: 0 ok, 3 skipped, 0 error" in err
-    # The map names no library, so phase 06 has no lines.
+    # The map names no library, so phases 06 and 07 have no lines.
     assert "06-upstream: 0 ok, 0 skipped, 0 error" in err
+    assert "07-recognizers: 0 ok, 0 skipped, 0 error" in err
     assert (dirs.episode / "06-upstream.jsonl").read_text() == ""
+    assert (dirs.episode / "07-recognizers.jsonl").read_text() == ""
     # No prefixes, so nothing to map: the todo has only its header.
     todo = (dirs.episode / "library-map-todo.csv").read_text()
     assert todo == ",".join(COLUMNS) + "\n"
@@ -817,6 +821,7 @@ def test_scan_stops_for_the_manual_step(
     err = capsys.readouterr().err
     assert "library-map-todo" not in err
     assert "06-upstream: 1 ok, 0 skipped, 0 error" in err
+    assert "07-recognizers: 1 ok, 0 skipped, 0 error" in err
     assert todo.read_text() == f"{header}\n"
     [libpng] = dirs.lines("06-upstream")
     assert libpng["library"] == "libpng"
@@ -1014,22 +1019,23 @@ def test_changed_map_after_phase_06_fails_preflight(
     capsys.readouterr()
     # An unchanged map reruns nothing.
     assert run(dirs, "--count", "3") == 0
-    assert "06-upstream: already finished, skipped" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "06-upstream: already finished, skipped" in err
+    assert "07-recognizers: already finished, skipped" in err
 
     dirs.map.write_text(f"{','.join(COLUMNS)}\n{row}\nlibfoo,skip,,,,,,,,\n")
-    (dirs.episode / "07-later.jsonl").write_text("")
     assert run(dirs, "--count", "3") == 2
     assert capsys.readouterr().err == (
         "pypiscan scan: error: the library map has changed since phase 06 ran. "
-        "Delete 06-upstream.jsonl, 07-later.jsonl to rerun phase 06 and every "
-        "later phase.\n"
+        "Delete 06-upstream.jsonl, 07-recognizers.jsonl to rerun phase 06 and "
+        "every later phase.\n"
     )
 
     # Without a recorded sha256, the map can't be checked either.
     del recorded["library_map_sha256"]
     (dirs.episode / "episode.json").write_text(json.dumps(recorded))
     assert run(dirs, "--count", "3") == 2
-    assert "Delete 06-upstream.jsonl, 07-later.jsonl" in capsys.readouterr().err
+    assert "Delete 06-upstream.jsonl, 07-recognizers.jsonl" in capsys.readouterr().err
 
 
 def test_version_1_episode_passes_preflight(
@@ -1078,3 +1084,169 @@ def test_phase_06_writes_episode_json_whole_or_not_at_all(
         "library_map_sha256": "sha",
     }
     assert [p.name for p in tmp_path.iterdir() if p.is_file()] == ["episode.json"]
+
+
+# Phase 07 and the per-library runner rule.
+
+
+def test_per_library_phases_run_every_library(tmp_path: Path) -> None:
+    """A per-library phase runs a library whatever its earlier lines say;
+    a per-package phase still skips one whose previous line isn't ok."""
+    first = {"zlib": Result("skipped", "not_github"), "xz": Result("error", "x")}
+    ran: list[str] = []
+
+    def go(library: Library, earlier: Mapping[str, Line]) -> Result:
+        ran.append(library.name)
+        return Result("ok")
+
+    libraries = [Library("zlib", "r", "v{version}"), Library("xz", "x", "v{version}")]
+    phases = [
+        Phase("06-upstream", lambda lib, e: first[lib.name], skip_not_ok=False),
+        Phase("07-recognizers", go, skip_not_ok=False),
+    ]
+    status = run_phases(tmp_path, libraries, phases, Stop(), io.StringIO(), "library")
+    assert status == 0
+    assert ran == ["zlib", "xz"]
+    text = (tmp_path / "07-recognizers.jsonl").read_text()
+    assert [json.loads(line)["status"] for line in text.splitlines()] == ["ok", "ok"]
+
+    # The same items in a phase that keeps the default do get skipped.
+    ran.clear()
+    phases = [
+        Phase("01-a", lambda lib, e: first[lib.name]),
+        Phase("02-b", go),
+    ]
+    status = run_phases(tmp_path, libraries, phases, Stop(), io.StringIO(), "library")
+    assert status == 0
+    assert ran == []
+
+
+RECOGNIZER_MAP = [
+    "libpng16,libpng,P,v{version},library_string,libpng version {version},png.c,,,",
+    "libpng16d,libpng,P,v{version},bare_version,{version},png.h,,,",
+    "libcrypto,openssl,O,openssl-{version},library_string,"
+    "OpenSSL {version} {any},include/openssl/opensslv.h.in,,,",
+    "libssl,openssl,O,openssl-{version},,,,,,",
+    "libwebp,libwebp,W,v{version},,,,,,",
+    "libopenjp2,openjpeg,J,v{version},build_path,{any}/openjpeg-{version}/{any},,,,",
+]
+
+
+def recognizers(tmp_path: Path, name: str) -> Result:
+    path = tmp_path / "m.csv"
+    path.write_text("\n".join([",".join(COLUMNS), *RECOGNIZER_MAP]) + "\n")
+    rows = load_library_map(path)
+    by_name = {lib.name: lib for lib in upstream_libraries(rows)}
+    phase = recognizers_phase(rows)
+    assert phase.name == "07-recognizers" and not phase.skip_not_ok
+    return phase.run(by_name[name], {})
+
+
+def test_phase_07_lists_recognizers_under_every_prefix(tmp_path: Path) -> None:
+    result = recognizers(tmp_path, "libpng")
+    assert result == Result(
+        "ok",
+        None,
+        {
+            "recognizers": [
+                {
+                    "prefix": "libpng16",
+                    "kind": "library_string",
+                    "pattern": "libpng version {version}",
+                    "identity_file": "png.c",
+                },
+                {
+                    "prefix": "libpng16d",
+                    "kind": "bare_version",
+                    "pattern": "{version}",
+                    "identity_file": "png.h",
+                },
+            ]
+        },
+    )
+    entries = cast(list[dict[str, str]], result.data["recognizers"])
+    found = [matcher(e["pattern"], e["kind"]) for e in entries]
+    png = found[0].fullmatch("libpng version 1.6.58")
+    assert png is not None and png[1] == "1.6.58"
+    assert found[1].fullmatch("1.6.58") is not None
+
+
+def test_phase_07_leaves_out_rows_with_no_kind(tmp_path: Path) -> None:
+    result = recognizers(tmp_path, "openssl")
+    assert result.status == "ok"
+    assert result.data["recognizers"] == [
+        {
+            "prefix": "libcrypto",
+            "kind": "library_string",
+            "pattern": "OpenSSL {version} {any}",
+            "identity_file": "include/openssl/opensslv.h.in",
+        }
+    ]
+
+
+def test_phase_07_library_with_no_recognizer_is_skipped(tmp_path: Path) -> None:
+    assert recognizers(tmp_path, "libwebp") == Result("skipped", "no_recognizer")
+
+
+def test_phase_07_build_path_has_no_identity_file(tmp_path: Path) -> None:
+    result = recognizers(tmp_path, "openjpeg")
+    assert result.data["recognizers"] == [
+        {
+            "prefix": "libopenjp2",
+            "kind": "build_path",
+            "pattern": "{any}/openjpeg-{version}/{any}",
+            "identity_file": None,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("host", "repo", "status"),
+    [
+        ("github.com", "https://gitlab.com/libtiff/libtiff", "skipped"),
+        (None, "missing", "error"),
+    ],
+    ids=["not-github", "clone-fails"],
+)
+def test_phase_07_runs_whatever_phase_06_said(
+    dirs: Dirs,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    host: str | None,
+    repo: str,
+    status: str,
+) -> None:
+    monkeypatch.setattr(scan_module, "UPSTREAM_HOST", host)
+    if host is None:
+        repo = str(dirs.episode.parent / repo)
+    row = f"libtiff,libtiff,{repo},v{{version}},library_string,"
+    row += '"LIBTIFF, Version {version}",libtiff/tiffvers.h.in,,,'
+    dirs.map.write_text(f"{','.join(COLUMNS)}\n{row}\n")
+    assert run(dirs, "--count", "3") == 0
+    err = capsys.readouterr().err
+    assert "07-recognizers: 1 ok, 0 skipped, 0 error" in err
+    [upstream_line] = dirs.lines("06-upstream")
+    assert upstream_line["status"] == status
+    [line] = dirs.lines("07-recognizers")
+    assert line == {
+        "schema_version": 1,
+        "library": "libtiff",
+        "status": "ok",
+        "reason": None,
+        "recognizers": [
+            {
+                "prefix": "libtiff",
+                "kind": "library_string",
+                "pattern": "LIBTIFF, Version {version}",
+                "identity_file": "libtiff/tiffvers.h.in",
+            }
+        ],
+    }
+
+
+def test_every_per_library_phase_runs_every_library(tmp_path: Path) -> None:
+    """Phase's skip_not_ok defaults to the per-package rule, so a phase
+    added to library_phases without clearing it would skip libraries."""
+    phases = library_phases(tmp_path / "cache", tmp_path, "sha", [])
+    assert [phase.name for phase in phases] == ["06-upstream", "07-recognizers"]
+    assert [phase.name for phase in phases if phase.skip_not_ok] == []
