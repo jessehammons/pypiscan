@@ -1,8 +1,8 @@
 """Run a package list through the scan's phases, one finished phase at a time.
 
 See README "How a scan runs". Each phase writes ``NN-<phase>.jsonl.partial``
-with one line per package, or from phase 06 on per library, and renames it
-when every one is done, so an episode directory only ever holds whole phase
+with one line per package, or in phases 06 and 07 per library, and renames
+it when every one is done, so an episode directory only ever holds whole phase
 files plus at most one ``.partial`` left by an interrupted run.
 """
 
@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Protocol, TextIO, cast
 from urllib.parse import urlsplit
 
+from pypiscan import fingerprint
 from pypiscan.fetch import download
 from pypiscan.git import GitError, clone_or_fetch, tags
 from pypiscan.library_map import (
@@ -25,10 +26,12 @@ from pypiscan.library_map import (
     LibraryMapError,
     MapRow,
     load_library_map,
+    matcher,
     tag_matcher,
     tag_version,
 )
 from pypiscan.library_report import libraries, report, todo, write_todo
+from pypiscan.noise import usable
 from pypiscan.package_list import Package, PackageListError, load_package_list
 from pypiscan.pypi import (
     ARCH,
@@ -45,7 +48,7 @@ from pypiscan.wheel_inspect import (
     WheelError,
     inspect_wheel,
 )
-from pypiscan.wheel_strings import strings_wheel
+from pypiscan.wheel_strings import BinaryStrings, strings_wheel
 
 SCHEMA_VERSION = 1
 EPISODE_SCHEMA_VERSION = 2
@@ -226,6 +229,59 @@ def libraries_phase(episode: Path) -> Phase[Package]:
         (episode / "library-report.md").write_text(text, encoding="utf-8")
 
     return Phase("05-libraries", run, finish)
+
+
+# A compiled recognizer: its library, kind and whole-string matcher.
+type Recognizer = tuple[str, fingerprint.Kind, re.Pattern[str]]
+
+
+def fingerprint_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
+    """Phase 08: run the recognizers in phase 07's ``ok`` lines on each
+    `.libs/` file whose prefix they're listed under, over the file's strings
+    in phase 04's records that pass the noise filter.
+
+    A recognizer must match a string's whole text. Records follow phase 05's
+    file order, then the libraries' order in phase 07's lines.
+    """
+    by_prefix: dict[str, list[Recognizer]] = {}
+    for line in recognizer_lines:
+        if line["status"] != "ok":
+            continue
+        for entry in cast(list[dict[str, str]], line["recognizers"]):
+            kind = cast(fingerprint.Kind, entry["kind"])
+            by_prefix.setdefault(entry["prefix"], []).append(
+                (str(line["library"]), kind, matcher(entry["pattern"], kind))
+            )
+
+    def run(package: Package, earlier: Mapping[str, Line]) -> Result:
+        strings_line = earlier["04-strings"]
+        wheel = cast(str, strings_line["wheel"])
+        binaries = {
+            b["path"]: b for b in cast(list[BinaryStrings], strings_line["records"])
+        }
+        records: list[object] = []
+        for found in cast(list[dict[str, str]], earlier["05-libraries"]["libraries"]):
+            binary = binaries[found["path"]]
+            strings = [s for s in binary["strings"] if usable(s)]
+            matches: dict[str, list[fingerprint.Match]] = {}
+            for library, kind, regex in by_prefix.get(found["prefix"], []):
+                matches.setdefault(library, []).extend(
+                    fingerprint.Match(
+                        library, kind, s["text"], s["offset"], m[1], s["section"]
+                    )
+                    for s in strings
+                    if (m := regex.fullmatch(s["text"]))
+                )
+            for library, library_matches in matches.items():
+                library_matches.sort(key=lambda m: cast(int, m.offset))
+                record = fingerprint.record(
+                    wheel, binary["path"], binary["sha256"], library, library_matches
+                )
+                if record is not None:
+                    records.append(record)
+        return Result("ok", None, {"wheel": wheel, "records": records})
+
+    return Phase("08-fingerprint", run)
 
 
 def phases(client: HttpClient, cache_dir: Path, episode: Path) -> list[Phase[Package]]:
@@ -513,14 +569,20 @@ def run_phases[T: Named](
     stop: Stop,
     err: TextIO,
     key: str = "name",
+    finished: Sequence[str] = (),
 ) -> int:
     """Run each unfinished phase over every item; skip finished ones.
 
     ``key`` names the item in each line: ``name`` for a package, ``library``
-    for a library.
+    for a library. ``finished`` names phases an earlier call ran over the
+    same items, in order; their lines are loaded first, without being
+    listed on ``err``, so the skip rule and its reason see them.
     """
     # Each item's lines from the finished phases, keyed by phase name.
     earlier: dict[str, dict[str, Line]] = {item.name: {} for item in items}
+    for name in finished:
+        for item_name, line in _read_lines(episode / f"{name}.jsonl", key).items():
+            earlier[item_name][name] = line
     for phase in phase_list:
         if stop.requested:
             print(f"interrupted before {phase.name}", file=err)
@@ -628,6 +690,15 @@ def scan(
             return status
         part_2 = library_phases(cache, episode, _sha256(library_map), rows)
         libraries = upstream_libraries(rows)
-        return run_phases(episode, libraries, part_2, stop, err, key="library")
+        status = run_phases(episode, libraries, part_2, stop, err, key="library")
+        if status:
+            return status
+        # Phase 08 is per package again, after the per-library phases: it
+        # runs the recognizers phase 07 recorded, and its skip rule looks at
+        # part 1's lines.
+        recognizers = _read_lines(episode / "07-recognizers.jsonl", "library")
+        part_3 = [fingerprint_phase(list(recognizers.values()))]
+        names = [phase.name for phase in part_1]
+        return run_phases(episode, packages, part_3, stop, err, finished=names)
     finally:
         signal.signal(signal.SIGINT, handler)

@@ -310,3 +310,41 @@ def test_rejects_tags_without_one_version(
 def test_tag_matcher(tags: str, tag: str, version: str | None) -> None:
     match = tag_matcher(tags).fullmatch(tag)
     assert (match and tag_version(match[1])) == version
+
+
+# libfoo's bare_version row, and another library under the same prefix.
+BAR_KIND = (
+    "libfoo,bar,https://example.org/bar,v{version},library_string,"
+    "bar {version},bar.c,,,"
+)
+BAR_NO_KIND = "libfoo,bar,https://example.org/bar,v{version},,,,,,"
+
+
+@pytest.mark.parametrize("other", [BAR_KIND, BAR_NO_KIND], ids=["kind", "no-kind"])
+@pytest.mark.parametrize("bare_first", [True, False], ids=["bare-first", "bare-last"])
+def test_rejects_bare_version_under_a_multi_library_prefix(
+    tmp_path: Path, other: str, bare_first: bool
+) -> None:
+    rows = (BARE, other) if bare_first else (other, BARE)
+    path = write_map(tmp_path / "m.csv", *rows)
+    first, second = ("foo", "bar") if bare_first else ("bar", "foo")
+    message = (
+        f"{path}:3: prefix 'libfoo' maps to '{first}' and '{second}', so it "
+        "can't have a bare_version row: a bare version doesn't choose between "
+        r"libraries \(see line 2\)"
+    )
+    with pytest.raises(LibraryMapError, match=message):
+        load_library_map(path)
+
+
+def test_bare_version_under_a_single_library_prefix(tmp_path: Path) -> None:
+    other_prefix = BAR_KIND.replace("libfoo,", "libbar,", 1)
+    lib_string = BARE.replace("bare_version,{version}", "library_string,foo {version}")
+    rows = load_library_map(
+        write_map(tmp_path / "m.csv", BARE, lib_string, other_prefix)
+    )
+    assert [(r.prefix, r.library, r.kind) for r in rows] == [
+        ("libfoo", "foo", "bare_version"),
+        ("libfoo", "foo", "library_string"),
+        ("libbar", "bar", "library_string"),
+    ]

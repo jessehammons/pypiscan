@@ -62,6 +62,7 @@ def test_classic_zlib_contains() -> None:
         "sha256": hashlib.sha256(elf).hexdigest(),
         "library": "zlib",
         "relation": "contains",
+        "basis": "library_string",
         "version": "1.3.2",
         "conflict": False,
         "evidence": [
@@ -81,8 +82,9 @@ def test_classic_zlib_contains() -> None:
     }
 
 
-def test_schema_version_is_1() -> None:
-    assert SCHEMA_VERSION == 1
+def test_schema_version_is_2() -> None:
+    # 2 added basis.
+    assert SCHEMA_VERSION == 2
 
 
 def test_four_part_version_kept_exactly() -> None:
@@ -105,7 +107,11 @@ def test_banner_must_end_at_nul() -> None:
 def test_zlib_ng_is_never_reported_as_zlib() -> None:
     record = one(build_elf(None, rodata=ZLIB_NG_233))
 
-    assert (record["library"], record["relation"]) == ("zlib-ng", "contains")
+    assert (record["library"], record["relation"], record["basis"]) == (
+        "zlib-ng",
+        "contains",
+        "library_string",
+    )
     assert (record["version"], record["conflict"]) == ("2.3.3", False)
     assert [kind for kind, _, _ in texts(record)] == ["library_string"] * 3
 
@@ -156,7 +162,10 @@ def test_header_string_only_is_compiled_against() -> None:
     record = one(build_elf(["libz.so.1"], rodata=rodata))
 
     assert record["library"] == "zlib-ng"
-    assert record["relation"] == "compiled_against"
+    assert (record["relation"], record["basis"]) == (
+        "compiled_against",
+        "header_string",
+    )
     assert (record["version"], record["conflict"]) == ("1.3.1.zlib-ng", False)
 
 

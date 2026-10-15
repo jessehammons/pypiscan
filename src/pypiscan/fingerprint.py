@@ -2,7 +2,9 @@
 
 Evidence kinds, record format and detector rules are specified in the README
 section "How versions are identified". Library-specific knowledge lives in
-``pypiscan.detectors``; this module only scans and builds records.
+``pypiscan.detectors``; this module only scans and builds records. Scan
+phase 08 builds its records with ``record`` too, from matches it finds in
+phase 04's strings.
 """
 
 import hashlib
@@ -15,9 +17,15 @@ from typing import Literal, TypedDict
 from pypiscan.elf_sections import Sections, section_at, sections
 from pypiscan.wheel_inspect import iter_elf_members
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
-Kind = Literal["library_string", "header_string", "filename"]
+Kind = Literal[
+    "library_string", "build_path", "bare_version", "header_string", "filename"
+]
+Basis = Literal["library_string", "build_path", "bare_version", "header_string"]
+# The kinds that set a version, strongest first.
+VERSION_KINDS: tuple[Basis, ...] = ("library_string", "build_path", "bare_version")
+Relation = Literal["contains", "compiled_against"]
 
 
 @dataclass(frozen=True)
@@ -81,28 +89,30 @@ class FingerprintRecord(TypedDict):
     path: str
     sha256: str
     library: str
-    relation: Literal["contains", "compiled_against"]
+    relation: Relation
+    basis: Basis
     version: str | None
     conflict: bool
     evidence: list[EvidenceRecord]
 
 
 @dataclass
-class _Match:
+class Match:
     library: str
     kind: Kind
     text: str
     offset: int | None
     version: str | None  # None when the match must not set the version
+    section: str | None = None
 
 
 def _decode(raw: bytes) -> str:
     return raw.decode("ascii", "backslashreplace")
 
 
-def _matches(detector: Detector, path: str, data: bytes) -> list[_Match]:
+def _matches(detector: Detector, path: str, data: bytes) -> list[Match]:
     found = [
-        _Match(
+        Match(
             p.library,
             p.kind,
             _decode(m.group(0).rstrip(b"\0")),
@@ -114,7 +124,7 @@ def _matches(detector: Detector, path: str, data: bytes) -> list[_Match]:
     ]
     name = PurePosixPath(path).name.encode()
     found += [
-        _Match(p.library, p.kind, _decode(m.group(0)), None, None)
+        Match(p.library, p.kind, _decode(m.group(0)), None, None)
         for p in detector.filename_patterns
         if (m := p.regex.fullmatch(name))
     ]
@@ -128,19 +138,53 @@ def _matches(detector: Detector, path: str, data: bytes) -> list[_Match]:
     return found
 
 
-def _resolve(
-    matches: list[_Match],
-) -> tuple[Literal["contains", "compiled_against"], str | None, bool] | None:
-    lib = [m for m in matches if m.kind == "library_string"]
-    if lib:
-        versions = {m.version for m in lib if m.version is not None}
-        conflict = len(versions) > 1
-        version = versions.pop() if len(versions) == 1 else None
-        return "contains", version, conflict
+def resolve(matches: list[Match]) -> tuple[Relation, Basis, str | None, bool] | None:
+    """Relation, basis, version and conflict for one library's matches.
+
+    The strongest version-setting kind present is the basis, and sets the
+    version if its matches agree. Any two version-setting matches that
+    disagree make a conflict. Header strings alone give ``compiled_against``;
+    filename evidence alone gives nothing. A match whose version is ``None``
+    counts toward neither version nor conflict.
+    """
+    kinds = {m.kind for m in matches}
+    for basis in VERSION_KINDS:
+        if basis in kinds:
+            versions = {m.version for m in matches if m.kind == basis} - {None}
+            setting = {m.version for m in matches if m.kind in VERSION_KINDS}
+            conflict = len(setting - {None}) > 1
+            version = versions.pop() if len(versions) == 1 else None
+            return "contains", basis, version, conflict
     headers = {m.text for m in matches if m.kind == "header_string"}
     if headers:
-        return "compiled_against", headers.pop() if len(headers) == 1 else None, False
-    return None  # filename evidence alone never produces a record
+        version = headers.pop() if len(headers) == 1 else None
+        return "compiled_against", "header_string", version, False
+    return None
+
+
+def record(
+    wheel_name: str, path: str, sha256: str, library: str, matches: list[Match]
+) -> FingerprintRecord | None:
+    """The record for one binary and library, or ``None`` if it has none."""
+    result = resolve(matches)
+    if result is None:
+        return None
+    relation, basis, version, conflict = result
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "wheel": wheel_name,
+        "path": path,
+        "sha256": sha256,
+        "library": library,
+        "relation": relation,
+        "basis": basis,
+        "version": version,
+        "conflict": conflict,
+        "evidence": [
+            {"kind": m.kind, "text": m.text, "offset": m.offset, "section": m.section}
+            for m in matches
+        ],
+    }
 
 
 def fingerprint_binary(
@@ -151,39 +195,16 @@ def fingerprint_binary(
     mapped: Sections | None = None
     records: list[FingerprintRecord] = []
     for detector in detectors:
-        by_library: dict[str, list[_Match]] = {}
+        by_library: dict[str, list[Match]] = {}
         for m in _matches(detector, path, data):
+            if m.offset is not None:
+                if mapped is None:
+                    mapped = sections(data)
+                m.section = section_at(mapped, m.offset)
             by_library.setdefault(m.library, []).append(m)
         for library, matches in by_library.items():
-            result = _resolve(matches)
-            if result is None:
-                continue
-            if mapped is None:
-                mapped = sections(data)
-            relation, version, conflict = result
-            records.append(
-                {
-                    "schema_version": SCHEMA_VERSION,
-                    "wheel": wheel_name,
-                    "path": path,
-                    "sha256": sha256,
-                    "library": library,
-                    "relation": relation,
-                    "version": version,
-                    "conflict": conflict,
-                    "evidence": [
-                        {
-                            "kind": m.kind,
-                            "text": m.text,
-                            "offset": m.offset,
-                            "section": None
-                            if m.offset is None
-                            else section_at(mapped, m.offset),
-                        }
-                        for m in matches
-                    ],
-                }
-            )
+            if found := record(wheel_name, path, sha256, library, matches):
+                records.append(found)
     return records
 
 
