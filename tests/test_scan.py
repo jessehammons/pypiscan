@@ -31,6 +31,7 @@ from pypiscan.scan import (
     git_work_tree,
     inspect_phase,
     libraries_phase,
+    library_phases,
     recognizers_phase,
     run_phases,
     scan,
@@ -1241,3 +1242,11 @@ def test_phase_07_runs_whatever_phase_06_said(
             }
         ],
     }
+
+
+def test_every_per_library_phase_runs_every_library(tmp_path: Path) -> None:
+    """Phase's skip_not_ok defaults to the per-package rule, so a phase
+    added to library_phases without clearing it would skip libraries."""
+    phases = library_phases(tmp_path / "cache", tmp_path, "sha", [])
+    assert [phase.name for phase in phases] == ["06-upstream", "07-recognizers"]
+    assert [phase.name for phase in phases if phase.skip_not_ok] == []
