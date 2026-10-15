@@ -77,6 +77,10 @@ Each finding also carries the basis of the version it rests on (see
 is best effort, so before anything is sent to a maintainer, the bundled
 library and its version are confirmed by hand, whatever the basis.
 
+A bare version is only a hint. When it is a finding's basis, another
+source must confirm the version before the finding is sent: the package's
+build scripts, an SBOM in the wheel, or a library string found by hand.
+
 ## Sources of truth
 
 - **The wheel's binaries** are what users actually run, and the primary
@@ -120,7 +124,10 @@ strongest first:
   bare version doesn't choose between them. Nothing around a bare version
   anchors it, so it must be three or more numbers separated by dots. That
   keeps out other libraries' header strings, such as `1.3.1.zlib-ng` in
-  libpng, and numbers such as `001.000` in harfbuzz.
+  libpng, and numbers such as `001.000` in harfbuzz. A bare version is a
+  hint, the weakest evidence that sets a version: a finding that rests on
+  one needs another source to confirm the version (see
+  [How findings are classified](#how-findings-are-classified)).
 - **Header string**: a version macro from the library's public header, such
   as `ZLIB_VERSION`. Code that *calls* a library embeds it; for example,
   zlib's `deflateInit()` passes `ZLIB_VERSION` to the library. It shows
@@ -209,8 +216,9 @@ per binary, library and relation:
 - `library`: such as `zlib` or `zlib-ng`.
 - `relation`: `contains` when a library string, build path or bare version
   matched; `compiled_against` when only header strings did.
-- `basis`: the kind that set the version (`library_string`, `build_path` or
-  `bare_version`), or `header_string` for `compiled_against`.
+- `basis`: for `contains`, the strongest kind present (`library_string`,
+  `build_path` or `bare_version`): the kind that sets the version, or
+  would if its matches agreed. For `compiled_against`, `header_string`.
 - `version`: from the strongest kind present for `contains`; the header
   string verbatim for `compiled_against`; `null` when matches of that
   strongest kind disagree.
@@ -326,7 +334,12 @@ Part 2:
    06, because recognizers come from the map, so a library whose clone was
    skipped or failed still gets them.
 8. `08-fingerprint` (per package): run the recognizers on each shared
-   library whose prefix maps to them, giving `fingerprint` records.
+   library whose prefix maps to them, giving `fingerprint` records. It
+   compiles the recognizers from phase 07's lines, so phase 07's file is the
+   record of what ran, and matches them against the library's strings in
+   phase 04's records that pass the noise filter, without reading the wheel
+   again. Phase 04 lists only strings with a version-like token (digit runs
+   joined by dots), so a recognizer whose string has none never matches.
 9. `09-cves` (network, per library): candidate CVEs from NVD, by the map's
    CPE, and OSV, by its OSV identifier, checked against the curated CVE
    table (section 6). Fixed versions come from the release tags that
@@ -380,7 +393,8 @@ the package list. One row per prefix, library and way of identifying it:
   - **identity** is empty in version 1. It is kept for checking patterns
     at every release tag (see [Later](#later-tbd)): the variable or macro
     that holds the string, when it is one C literal.
-  - A `bare_version` row's pattern is `{version}`.
+  - A `bare_version` row's pattern is `{version}`, and its prefix maps to
+    no other library, since a bare version doesn't choose between them.
   - For `build_path`, **identity_file** and **identity** are empty.
 - A library can have several rows, one per way of identifying it. Prefer a
   library string; use a build path or a bare version for a library that
@@ -659,14 +673,15 @@ Adding a library means adding rows to the library map, not code.
 - **4.2** ✓ Phase 07, recognizers built from the library map's patterns:
   one line per library listing them, or `skipped` with reason
   `no_recognizer`.
-- **4.3** Phase 08, fingerprint with the recognizers and the noise filter.
-  Adds `basis` to fingerprint records and bumps their `schema_version`.
-  Manual check: compare results against Pillow 12.3.0's
-  `.github/dependencies.json`. **← current**
+- **4.3** ✓ Phase 08, fingerprint with the recognizers and the noise
+  filter. Adds `basis` to fingerprint records and bumps their
+  `schema_version`. The loader rejects a `bare_version` row whose prefix
+  maps to another library. Manual check: compare results against Pillow
+  12.3.0's `.github/dependencies.json`.
 - **4.4** *(maintainer input)* The libraries the map marks as identified
   with no recognizer, such as libwebp, brotli, Little CMS, FreeType and
   libpq, which embed no version string: choose a detection method for each
-  before implementing it.
+  before implementing it. **← current**
 - **4.5** Report shared libraries no recognizer identified, including the
   libraries the map marks as having none, so gaps are visible.
 
@@ -700,7 +715,8 @@ Adding a library means adding rows to the library map, not code.
 
 - **7.1** Phase 10, `match`: compare fingerprints against the CVE table and
   write candidates with their evidence level into the episode, which is
-  outside the repository.
+  outside the repository. A candidate whose version's basis is
+  `bare_version` is marked as needing another source to confirm it.
 - **7.2** Evidence for levels 2 and 3: whether the affected function is
   present in the binary, and which extension modules import functions from
   the bundled library.

@@ -13,6 +13,8 @@ import pytest
 
 from pypiscan.library_map import MapRow, load_library_map, matcher
 from pypiscan.library_report import prefix
+from pypiscan.noise import usable
+from pypiscan.wheel_strings import VERSION_TOKEN, StringRecord, template
 
 ROOT = Path(__file__).parent.parent
 FIELDS = ["prefix", "library", "kind", "version", "string", "wheel", "member"]
@@ -78,3 +80,19 @@ def test_example_comes_from_its_prefix(example: dict[str, str]) -> None:
     assert example["wheel"].endswith(".whl")
     assert ".libs/" in example["member"]
     assert prefix(example["member"]) == example["prefix"]
+
+
+@pytest.mark.parametrize("example", MATCHES, ids=example_id)
+def test_phase_04_lists_the_example(example: dict[str, str]) -> None:
+    """Phase 08 sees only strings phase 04 lists, with a dotted version
+    token, that pass the noise filter; a recognizer whose string phase 04
+    wouldn't list could never match."""
+    text = example["string"]
+    assert VERSION_TOKEN.search(text.encode("ascii"))
+    record: StringRecord = {
+        "offset": 0,
+        "section": ".rodata",
+        "text": text,
+        "template": template(text),
+    }
+    assert usable(record)

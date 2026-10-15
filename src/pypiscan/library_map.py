@@ -7,7 +7,8 @@ mapped row needs a repo and tags, which ``tag_matcher`` compiles, and no
 identity in version 1. A row with a kind is a recognizer: its pattern
 compiles with ``matcher``, and a ``library_string`` or ``bare_version``
 row cites an ``identity_file``. A row with no kind marks a library that is
-identified but has no recognizer yet. ``cpe`` and ``osv`` may be empty
+identified but has no recognizer yet. A ``bare_version`` row's prefix maps
+to no other library. ``cpe`` and ``osv`` may be empty
 until the CVE table (roadmap 6.1) requires them.
 """
 
@@ -155,6 +156,16 @@ def _clash(row: MapRow, earlier: list[tuple[int, MapRow]]) -> str | None:
             row.library == SKIP
         ):
             return f"prefix {row.prefix!r} is both skip and mapped (see line {line})"
+        if (
+            other.prefix == row.prefix
+            and other.library != row.library
+            and "bare_version" in (other.kind, row.kind)
+        ):
+            return (
+                f"prefix {row.prefix!r} maps to {other.library!r} and "
+                f"{row.library!r}, so it can't have a bare_version row: a bare "
+                f"version doesn't choose between libraries (see line {line})"
+            )
         if row.library == SKIP or other.library != row.library:
             continue
         if other.prefix == row.prefix and not (other.kind and row.kind):

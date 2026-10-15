@@ -744,9 +744,16 @@ def stub_phases(client: object, cache_dir: Path, episode: Path) -> list[Phase]:
         records: list[object] = [
             {
                 "path": path,
+                "sha256": f"sha-{path}",
                 "strings": [
-                    {"section": ".rodata", "text": text, "template": "T " + text},
                     {
+                        "offset": 16,
+                        "section": ".rodata",
+                        "text": text,
+                        "template": "T " + text,
+                    },
+                    {
+                        "offset": 64,
                         "section": ".comment",
                         "text": "GCC: (GNU) 14.2.1",
                         "template": "G",
@@ -755,7 +762,8 @@ def stub_phases(client: object, cache_dir: Path, episode: Path) -> list[Phase]:
             }
             for path, text in LIBS[package.name]
         ]
-        return Result("ok", None, {"records": records})
+        wheel = f"{package.name}.whl"
+        return Result("ok", None, {"wheel": wheel, "records": records})
 
     return [
         Phase("01-resolve", resolve),
@@ -806,9 +814,8 @@ def test_scan_stops_for_the_manual_step(
 
     # Mapping one prefix leaves the other, and phase 06 doesn't run.
     repo = make_repo(dirs.episode.parent / "libpng", {"v1.6.58": {}})
-    png = (
-        f"libpng16,libpng,{repo},v{{version}},library_string,libpng {{version}},p.c,,,"
-    )
+    png = f"libpng16,libpng,{repo},v{{version}},library_string,"
+    png += "libpng version {version},p.c,,,"
     dirs.map.write_text(f"{header}\n{png}\n")
     assert run(dirs, "--count", "3") == 3
     assert "\n  libgfortran\n" in capsys.readouterr().err
@@ -822,10 +829,44 @@ def test_scan_stops_for_the_manual_step(
     assert "library-map-todo" not in err
     assert "06-upstream: 1 ok, 0 skipped, 0 error" in err
     assert "07-recognizers: 1 ok, 0 skipped, 0 error" in err
+    assert "08-fingerprint: 2 ok, 1 skipped, 0 error" in err
     assert todo.read_text() == f"{header}\n"
     [libpng] = dirs.lines("06-upstream")
     assert libpng["library"] == "libpng"
     assert libpng["tags"] == [{"tag": "v1.6.58", "version": "1.6.58"}]
+    demo, pure, missing = dirs.lines("08-fingerprint")
+    path = "demo.libs/libpng16-1a2b3c4d.so.16.58.0"
+    assert demo["wheel"] == "demo.whl"
+    assert demo["records"] == [
+        {
+            "schema_version": 2,
+            "wheel": "demo.whl",
+            "path": path,
+            "sha256": f"sha-{path}",
+            "library": "libpng",
+            "relation": "contains",
+            "basis": "library_string",
+            "version": "1.6.58",
+            "conflict": False,
+            "evidence": [
+                {
+                    "kind": "library_string",
+                    "text": "libpng version 1.6.58",
+                    "offset": 16,
+                    "section": ".rodata",
+                }
+            ],
+        }
+    ]
+    [record] = cast(list[Line], pure["records"])
+    assert (record["library"], record["version"]) == ("libpng", "1.6.50")
+    assert (missing["status"], missing["reason"]) == ("skipped", "01-resolve")
+
+    # A rerun skips every phase, phase 08 included, and lists each once.
+    assert run(dirs, "--count", "3") == 0
+    err = capsys.readouterr().err
+    assert "08-fingerprint: already finished, skipped" in err
+    assert err.count("05-libraries: already finished, skipped") == 1
 
 
 # Phase 06, against synthetic repositories built in tmp_path.
@@ -1027,15 +1068,17 @@ def test_changed_map_after_phase_06_fails_preflight(
     assert run(dirs, "--count", "3") == 2
     assert capsys.readouterr().err == (
         "pypiscan scan: error: the library map has changed since phase 06 ran. "
-        "Delete 06-upstream.jsonl, 07-recognizers.jsonl to rerun phase 06 and "
-        "every later phase.\n"
+        "Delete 06-upstream.jsonl, 07-recognizers.jsonl, 08-fingerprint.jsonl "
+        "to rerun phase 06 and every later phase.\n"
     )
 
     # Without a recorded sha256, the map can't be checked either.
     del recorded["library_map_sha256"]
     (dirs.episode / "episode.json").write_text(json.dumps(recorded))
     assert run(dirs, "--count", "3") == 2
-    assert "Delete 06-upstream.jsonl, 07-recognizers.jsonl" in capsys.readouterr().err
+    assert "Delete 06-upstream.jsonl, 07-recognizers.jsonl, 08-fingerprint.jsonl" in (
+        capsys.readouterr().err
+    )
 
 
 def test_version_1_episode_passes_preflight(
@@ -1250,3 +1293,27 @@ def test_every_per_library_phase_runs_every_library(tmp_path: Path) -> None:
     phases = library_phases(tmp_path / "cache", tmp_path, "sha", [])
     assert [phase.name for phase in phases] == ["06-upstream", "07-recognizers"]
     assert [phase.name for phase in phases if phase.skip_not_ok] == []
+
+
+def test_stop_during_part_2_leaves_no_phase_08(
+    dirs: Dirs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(scan_module, "phases", stub_phases)
+
+    def interrupt(library: Library, earlier: Mapping[str, Line]) -> Result:
+        # Call the installed handler directly instead of raising a signal.
+        handler = signal.getsignal(signal.SIGINT)
+        assert callable(handler)
+        handler(signal.SIGINT, None)
+        return Result("ok")
+
+    def part_2(*args: object) -> list[Phase[Library]]:
+        return [Phase("06-upstream", interrupt, skip_not_ok=False)]
+
+    monkeypatch.setattr(scan_module, "library_phases", part_2)
+    header = ",".join(COLUMNS)
+    png = "libpng16,libpng,r,v{version},,,,,,"
+    dirs.map.write_text(f"{header}\n{png}\nlibgfortran,skip,,,,,,,,\n")
+    assert run(dirs, "--count", "3") == EXIT_INTERRUPTED
+    assert "interrupted after the last phase finished" in capsys.readouterr().err
+    assert not list(dirs.episode.glob("08-*"))
