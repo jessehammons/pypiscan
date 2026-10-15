@@ -77,9 +77,15 @@ Each finding also carries the basis of the version it rests on (see
 is best effort, so before anything is sent to a maintainer, the bundled
 library and its version are confirmed by hand, whatever the basis.
 
-A bare version is only a hint. When it is a finding's basis, another
-source must confirm the version before the finding is sent: the package's
-build scripts, an SBOM in the wheel, or a library string found by hand.
+Every basis is a signal for deciding whether a CVE might be worth
+investigating, not a conclusion. Every version pypiscan reports, in its
+records and in every report a person reads, is shown with the basis it
+rests on, so a reader can always tell which signal a version came from.
+
+A bare version is the weakest signal. When it is a finding's basis,
+another source must confirm the version before the finding is sent: the
+package's build scripts, an SBOM in the wheel, or a library string found
+by hand.
 
 ## Sources of truth
 
@@ -104,7 +110,7 @@ binary holds, and which version, is used, and every result records the kind
 of evidence it rests on. That way a wrong answer can be traced to its cause,
 weaker results can be confirmed by hand, and aggregate statistics can say
 which kinds they include. A version number means different things depending
-on where it comes from, so each match is recorded as one of five kinds,
+on where it comes from, so each match is recorded as one of six kinds,
 strongest first:
 
 - **Library string**: a string from the upstream library's own source that
@@ -116,6 +122,18 @@ strongest first:
   and its version, such as
   `/project/build/openjpeg-2.5.4/src/lib/openjp2/t1.c`. It shows which
   release's source was built.
+- **Version function machine code**: what an exported function whose job
+  is to report the library's version returns, read from the function's
+  machine code without running it. In Pillow 12.3.0's libwebp,
+  `WebPGetDecoderVersion` is `mov eax, 0x10600; ret`, which is 1.6.0. Only
+  a few exact code shapes are read (see
+  [Version function machine code](#version-function-machine-code)); any
+  other code gives nothing. The function's name ties its result to its
+  library, which a bare version lacks, so it ranks above one and counts
+  under a prefix that maps to several libraries. It is still a signal, not
+  a conclusion: a decoding rule can be wrong for a release it wasn't
+  checked against, and a fork can keep the function and change its
+  result.
 - **Bare version**: a string that is only a version, such as `2.5.4`,
   defined in the library's own source, typically what its version function
   returns. It counts only in a `.libs/` file whose prefix the library map
@@ -137,7 +155,7 @@ strongest first:
   `libz-….so.1.3.1`. It isn't part of the binary's contents, and for some
   libraries (libtiff, libwebp) it's an ABI number rather than a release.
 
-The first three kinds show that a binary contains the library, and the
+The first four kinds show that a binary contains the library, and the
 strongest kind present sets its version. A header string alone gives
 `compiled_against`. A filename is corroboration only: it never sets a
 version and never produces a record on its own.
@@ -149,7 +167,8 @@ that calls the library. In a `.libs/` file whose prefix the library map
 ties to that library it is the library's own, and recognizers only run on
 such files (phase 08).
 
-Exported symbols and `DT_SONAME` are not version evidence.
+An exported symbol's presence and `DT_SONAME` are not version evidence.
+What a version function's machine code returns is.
 
 Strings that can't identify a library are dropped before they are used.
 Only strings in data sections (`.rodata`, `.data` and `.data.rel.ro`)
@@ -214,11 +233,13 @@ per binary, library and relation:
 
 - `wheel`, `path`, `sha256`: as in `inspect`.
 - `library`: such as `zlib` or `zlib-ng`.
-- `relation`: `contains` when a library string, build path or bare version
-  matched; `compiled_against` when only header strings did.
+- `relation`: `contains` when a library string, build path, version
+  function machine code or bare version matched; `compiled_against` when
+  only header strings did.
 - `basis`: for `contains`, the strongest kind present (`library_string`,
-  `build_path` or `bare_version`): the kind that sets the version, or
-  would if its matches agreed. For `compiled_against`, `header_string`.
+  `build_path`, `version_function_machine_code` or `bare_version`): the
+  kind that sets the version, or would if its matches agreed. For
+  `compiled_against`, `header_string`.
 - `version`: from the strongest kind present for `contains`; the header
   string verbatim for `compiled_against`; `null` when matches of that
   strongest kind disagree.
@@ -231,6 +252,74 @@ per binary, library and relation:
 
 A binary with no matches produces no record. No record means "not detected",
 not "not present".
+
+### Version function machine code
+
+Some libraries embed no version string but export a function whose only
+job is to report the version, such as libwebp's `WebPGetDecoderVersion` or
+libpq's `PQlibVersion`. A `version_function_machine_code` row names such a
+function and says how its result gives the version. Phase 08 looks the
+function up among the defined functions in the file's `.dynsym`, reads its
+code from the cached wheel, and accepts only these shapes, optionally after
+`endbr64`:
+
+- it returns an integer (`mov eax, imm32; ret`);
+- it returns a pointer to a string in the file
+  (`lea rax, [rip+disp32]; ret`);
+- it stores three integers, the major, minor and patch numbers, through its
+  three pointer arguments, then returns.
+
+Each shape is accepted both as an optimizing compiler emits it and as an
+unoptimized build does, inside `push rbp; mov rbp, rsp` and `pop rbp;
+ret`: Pillow 12.3.0 builds lcms2 and FreeType, and pyzmq 27.2.0 builds
+libzmq, without optimization. Any other code gives nothing, so a misread
+function is a missed version, not a wrong one.
+
+The row's **pattern** is the function's name, `->`, and how its result
+gives the version:
+
+- `bits` and the widths of the version's fields in bits, most significant
+  first, with `*` for the top field: `WebPGetDecoderVersion -> bits *.8.8`
+  reads 0x10600 as 1.6.0, and `BrotliDecoderVersion -> bits *.12.12` reads
+  0x1002000 as 1.2.0.
+- `decimal` and the fields' widths in decimal digits, the same way, then
+  `from` and the smallest value the encoding holds for. A smaller value
+  gives nothing: `PQlibVersion -> decimal *.4 from 100000` reads 170011 as
+  17.11, and PostgreSQL before 10 encoded its versions differently.
+- `out`, for three integers stored through pointer arguments:
+  `zmq_version -> out` reads 4, 3 and 5 as 4.3.5.
+- `string` and a recognizer pattern that must match the whole string:
+  `avifVersion -> string {version}`, and dav1d's
+  `dav1d_version -> string {version}-0-g{any}`. In Pillow 12.3.0,
+  `avifVersion` points into the tail of an unrelated message,
+  `…Section 7.3.11.4.2`, because the linker merged the two, so no string
+  in the file is libavif's version on its own. dav1d's string is
+  `git describe` output, such as `1.5.3-0-gb546257`; `-0-g` means the build
+  was made exactly at a release tag, so a build made between releases
+  matches nothing.
+
+Rules for these rows:
+
+- **identity_file** is the upstream source file that defines the function,
+  at the release the binary gives.
+- Before a row is added, its encoding is checked by hand against the
+  library's version macros at every release tag, and the check is recorded
+  in the pull request. An encoding that gives two releases the same value
+  can't be used: lcms2's `cmsGetEncodedCMMversion` returns 2190 for both
+  2.19 and 2.19.1, so lcms2 has no such row.
+- The derivative rule for library strings applies: a row is added only
+  after checking for derivatives that keep the function and change its
+  result, as zlib-ng's `zlibVersion` returns `1.3.1.zlib-ng`.
+- Every row is tested against real code. A committed fixture,
+  `tests/version_function_examples.tsv`, holds for each row the function's
+  bytes from a real wheel (and, for a string, the string it points to),
+  the version they must give, and the wheel and member they came from. It
+  also holds code that must give nothing, such as FreeType's
+  `FT_Library_Version`, which copies the version out of a struct.
+- A match's evidence has the function's name and its result as read, such
+  as `WebPGetDecoderVersion: 0x10600`, `avifVersion: "1.4.2"` or
+  `zmq_version: 4, 3, 5`, and the file offset and section of the
+  function's first byte.
 
 ## How a scan runs
 
@@ -340,6 +429,10 @@ Part 2:
    phase 04's records that pass the noise filter, without reading the wheel
    again. Phase 04 lists only strings with a version-like token (digit runs
    joined by dots), so a recognizer whose string has none never matches.
+   Version function machine code is the exception: for a file whose prefix
+   has such a recognizer, phase 08 reads the file from the wheel at phase
+   02's path and decodes the function (see
+   [Version function machine code](#version-function-machine-code)).
 9. `09-cves` (network, per library): candidate CVEs from NVD, by the map's
    CPE, and OSV, by its OSV identifier, checked against the curated CVE
    table (section 6). Fixed versions come from the release tags that
@@ -359,7 +452,8 @@ the package list. One row per prefix, library and way of identifying it:
 | `libfreetype` | `bzip2` | `https://sourceware.org/git/bzip2.git` | `bzip2-{version}` | `library_string` | `{version}, {any}` | `bzlib_private.h` | | `bzip:bzip2` | … |
 | `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | `build_path` | `{any}/openjpeg-{version}/{any}` | | | `uclouvain:openjpeg` | … |
 | `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | `bare_version` | `{version}` | `src/lib/openjp2/opj_config_private.h.cmake.in` | | `uclouvain:openjpeg` | … |
-| `libwebp` | `libwebp` | `https://chromium.googlesource.com/webm/libwebp` | `v{version}` | | | | | `webmproject:libwebp` | … |
+| `libwebp` | `libwebp` | `https://chromium.googlesource.com/webm/libwebp` | `v{version}` | `version_function_machine_code` | `WebPGetDecoderVersion -> bits *.8.8` | `src/dec/vp8_dec.c` | | `webmproject:libwebp` | … |
+| `liblcms2` | `lcms2` | `https://github.com/mm2/Little-CMS` | `lcms{version}` | | | | | | |
 | `libgfortran` | `skip` | | | | | | | | |
 
 - **prefix** is how a file is found, **library** is what it turns out to
@@ -368,8 +462,8 @@ the package list. One row per prefix, library and way of identifying it:
   zlib.
 - A prefix can map to several libraries (`libz` may be zlib or zlib-ng in
   compat mode, and Pillow's `libfreetype` has bzip2 compiled into it). The
-  prefix picks which recognizers to try; the strings in the file decide
-  which one it is.
+  prefix picks which recognizers to try; the strings and version functions
+  in the file decide which one it is.
 - **repo** is where the library's source is, and **tags** how its release
   tags are named, with `{version}` where the version is (`v{version}`,
   `openssl-{version}`). **repo** is required on every mapped row, and so
@@ -395,15 +489,19 @@ the package list. One row per prefix, library and way of identifying it:
     that holds the string, when it is one C literal.
   - A `bare_version` row's pattern is `{version}`, and its prefix maps to
     no other library, since a bare version doesn't choose between them.
+  - For `version_function_machine_code`, the pattern and
+    **identity_file** are as in
+    [Version function machine code](#version-function-machine-code), and
+    the prefix may map to other libraries.
   - For `build_path`, **identity_file** and **identity** are empty.
 - A library can have several rows, one per way of identifying it. Prefer a
-  library string; use a build path or a bare version for a library that
-  embeds no library string.
+  library string; for a library that embeds none, use a build path,
+  version function machine code or a bare version.
 - A row with a library and repo but no kind marks a library that is
-  identified but has no recognizer yet, such as libwebp, which embeds no
-  version string (roadmap 4.4). Under one prefix, a library has either
-  recognizer rows or one such row. Phase 08 has nothing to run for it, and
-  4.5 reports it.
+  identified but has no recognizer, such as lcms2 and FreeType, which
+  embed no version string and have no version function that can be read
+  (roadmap 4.4). Under one prefix, a library has either recognizer rows or
+  one such row. Phase 08 has nothing to run for it, and 4.5 reports it.
 - **cpe** and **osv** may be empty until the CVE table (6.1) requires
   them.
 - `skip` marks a prefix the maintainer has looked at and isn't tracking,
@@ -655,7 +753,10 @@ Later: a per-wheel time limit, which needs a subprocess per wheel.
 
 ### 4. Scan, part 2: recognizers
 
-Adding a library means adding rows to the library map, not code.
+Adding a library means adding rows to the library map, not code. 4.6 is
+the exception: it adds the code that reads version function machine code,
+and after it a library whose version function has one of its shapes is
+again only rows.
 
 - **4.1** ✓ Phase 06, upstream clones and tags. Clones or fetches every
   library the map names whose repository is on GitHub (others are `skipped`
@@ -678,12 +779,40 @@ Adding a library means adding rows to the library map, not code.
   `schema_version`. The loader rejects a `bare_version` row whose prefix
   maps to another library. Manual check: compare results against Pillow
   12.3.0's `.github/dependencies.json`.
-- **4.4** *(maintainer input)* The libraries the map marks as identified
-  with no recognizer, such as libwebp, brotli, Little CMS, FreeType and
-  libpq, which embed no version string: choose a detection method for each
-  before implementing it. **← current**
-- **4.5** Report shared libraries no recognizer identified, including the
-  libraries the map marks as having none, so gaps are visible.
+- **4.4** ✓ *(maintainer input)* A detection method for each library the
+  map marked as identified with no recognizer, chosen from upstream source,
+  the packages' build scripts and their real wheels (Pillow 12.3.0,
+  psycopg2-binary 2.9.13, pyzmq 27.2.0 and shapely 2.2.0). In none of
+  their files does a string or a build path give the version.
+  - Version function machine code (4.6) for libwebp (`libwebp`,
+    `libwebpdemux` and `libwebpmux`), brotli's `libbrotlidec`, libavif,
+    libpq and libzmq, and for dav1d, which libavif compiles in as its AV1
+    decoder.
+  - No method for lcms2, whose encoding gives 2.19 and 2.19.1 the same
+    value; FreeType, which has no function that returns its version;
+    OpenLDAP, whose version string the compiler drops; libsharpyuv, whose
+    function returns its own version (0.4.2 in libwebp 1.6.0), not
+    libwebp's; and `libbrotlicommon`, `libssl`, `libgeos` and krb5's
+    `libgssapi_krb5`, `libk5crypto` and `libkrb5support`, which have no
+    version function either. 4.5 reports them.
+- **4.5** A fingerprint report. Once phase 08 is finished, every run
+  rewrites `fingerprint-report.md` in the episode from phases 05, 07 and
+  08, as it rewrites `library-map-todo.csv`. It lists every `.libs/` file
+  each package carries and, for each library its prefix maps to, the
+  version and the basis it rests on, or why there is none: the map gives
+  the library no recognizer, or its recognizers matched nothing. A prefix
+  marked `skip` is listed as skipped. Signals and gaps are visible side by
+  side, and no version is shown without its basis. **← current**
+- **4.6** Version function machine code, as described in
+  [Version function machine code](#version-function-machine-code): the
+  `version_function_machine_code` kind and its pattern forms in the loader,
+  the decoder for its code shapes, phase 08 reading those functions from
+  the cached wheel, `tests/version_function_examples.tsv` from the real
+  wheels, and rows for the libraries 4.4 chose, including dav1d's under
+  `libavif`. Fingerprint records' `schema_version` goes to 3. Manual check:
+  Pillow 12.3.0, psycopg2-binary 2.9.13 and pyzmq 27.2.0 give the versions
+  their build scripts pin: libwebp 1.6.0, brotli 1.2.0, libavif 1.4.2,
+  dav1d 1.5.3 (pinned by libavif 1.4.2), libpq 17.11 and libzmq 4.3.5.
 
 ### 5. SBOM comparison
 
@@ -715,8 +844,9 @@ Adding a library means adding rows to the library map, not code.
 
 - **7.1** Phase 10, `match`: compare fingerprints against the CVE table and
   write candidates with their evidence level into the episode, which is
-  outside the repository. A candidate whose version's basis is
-  `bare_version` is marked as needing another source to confirm it.
+  outside the repository. Each candidate shows the basis of its version,
+  and one whose basis is `bare_version` is marked as needing another source
+  to confirm it.
 - **7.2** Evidence for levels 2 and 3: whether the affected function is
   present in the binary, and which extension modules import functions from
   the bundled library.
