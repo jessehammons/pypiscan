@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Protocol, TextIO, cast
+from urllib.parse import urlsplit
 
 from pypiscan.fetch import download
 from pypiscan.git import GitError, clone_or_fetch, tags
@@ -47,7 +48,7 @@ from pypiscan.wheel_inspect import (
 from pypiscan.wheel_strings import strings_wheel
 
 SCHEMA_VERSION = 1
-EPISODE_SCHEMA_VERSION = 1
+EPISODE_SCHEMA_VERSION = 2
 MB = 1_000_000
 WHEEL_SIZE_LIMIT = 100 * MB
 ZIP_MEMBER_SIZE_LIMIT = 512 * MB
@@ -56,6 +57,8 @@ STATUSES = ("ok", "skipped", "error")
 EXIT_PREFLIGHT = 2
 EXIT_MANUAL_STEP = 3
 EXIT_INTERRUPTED = 130
+# Version 1 clones only from GitHub; see README "Conventions".
+UPSTREAM_HOST = "github.com"
 PHASE_FILE = re.compile(r"(\d\d)-[a-z0-9-]+\.jsonl(\.partial)?")
 
 Line = dict[str, object]
@@ -239,15 +242,27 @@ def upstream_libraries(rows: Sequence[MapRow]) -> list[Library]:
     return list(found.values())
 
 
-def upstream_phase(cache_dir: Path, episode: Path, map_sha256: str) -> Phase[Library]:
+def on_host(repo: str, host: str) -> bool:
+    """Whether ``repo`` is an https URL on ``host``."""
+    url = urlsplit(repo)
+    return url.scheme == "https" and url.hostname == host
+
+
+def upstream_phase(
+    cache_dir: Path, episode: Path, map_sha256: str, host: str | None
+) -> Phase[Library]:
     """Phase 06: clone or fetch each library, and list the tags its tags matches.
 
-    When every library is done, records the map's sha256 in episode.json for
-    pre-flight check 5.
+    With ``host`` set, a repository that isn't an https URL on it gets a
+    ``skipped`` line with reason ``not_github`` and is never cloned; tests
+    pass ``None`` to clone local repositories. When every library is done,
+    records the map's sha256 in episode.json for pre-flight check 5.
     """
 
     def run(library: Library, earlier: Mapping[str, Line]) -> Result:
         data: Line = {"repo": library.repo}
+        if host is not None and not on_host(library.repo, host):
+            return Result("skipped", "not_github", data)
         directory = cache_dir / "upstream" / f"{library.name}.git"
         directory.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -272,8 +287,9 @@ def upstream_phase(cache_dir: Path, episode: Path, map_sha256: str) -> Phase[Lib
     def finish(names: Sequence[str], lines: Lines) -> None:
         record = episode / "episode.json"
         recorded = json.loads(record.read_text(encoding="utf-8"))
+        recorded["schema_version"] = EPISODE_SCHEMA_VERSION
         recorded["library_map_sha256"] = map_sha256
-        record.write_text(json.dumps(recorded, indent=2) + "\n", encoding="utf-8")
+        write_json(record, recorded)
 
     return Phase("06-upstream", run, finish)
 
@@ -281,7 +297,15 @@ def upstream_phase(cache_dir: Path, episode: Path, map_sha256: str) -> Phase[Lib
 def library_phases(
     cache_dir: Path, episode: Path, map_sha256: str
 ) -> list[Phase[Library]]:
-    return [upstream_phase(cache_dir, episode, map_sha256)]
+    return [upstream_phase(cache_dir, episode, map_sha256, UPSTREAM_HOST)]
+
+
+def write_json(path: Path, value: object) -> None:
+    """Write ``path`` whole or not at all, through a ``.partial`` file and a
+    rename, as phase files are written."""
+    partial = path.with_name(path.name + ".partial")
+    partial.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    partial.replace(path)
 
 
 def _sha256(path: Path) -> str:
@@ -544,17 +568,13 @@ def scan(
     record = episode / "episode.json"
     if not record.is_file():
         inputs = episode_inputs(package_list, count)
-        record.write_text(
-            json.dumps(
-                {
-                    "schema_version": EPISODE_SCHEMA_VERSION,
-                    **inputs,
-                    "code_version": importlib.metadata.version("pypiscan"),
-                },
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
+        write_json(
+            record,
+            {
+                "schema_version": EPISODE_SCHEMA_VERSION,
+                **inputs,
+                "code_version": importlib.metadata.version("pypiscan"),
+            },
         )
     stop = stop or Stop()
 

@@ -11,10 +11,11 @@ from elf_builder import build_elf
 from git_repo import make_repo
 from pypiscan import scan as scan_module
 from pypiscan.cli import main
-from pypiscan.git import clone_or_fetch
+from pypiscan.git import GitError, clone_or_fetch
 from pypiscan.library_map import COLUMNS, load_library_map
 from pypiscan.package_list import Package
 from pypiscan.scan import (
+    EPISODE_SCHEMA_VERSION,
     EXIT_INTERRUPTED,
     TARGET,
     WHEEL_SIZE_LIMIT,
@@ -25,6 +26,7 @@ from pypiscan.scan import (
     Phase,
     Result,
     Stop,
+    episode_inputs,
     fetch_phase,
     git_work_tree,
     inspect_phase,
@@ -124,6 +126,7 @@ def test_episode_json(dirs: Dirs) -> None:
     assert episode["wheel_size_limit"] == WHEEL_SIZE_LIMIT
     assert episode["zip_member_size_limit"] == ZIP_MEMBER_SIZE_LIMIT
     assert episode["code_version"] == "0.0.0"
+    assert episode["schema_version"] == EPISODE_SCHEMA_VERSION == 2
     assert len(episode["package_list_sha256"]) == 64
 
 
@@ -763,6 +766,7 @@ def test_scan_stops_for_the_manual_step(
     dirs: Dirs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(scan_module, "phases", stub_phases)
+    monkeypatch.setattr(scan_module, "UPSTREAM_HOST", None)
     assert run(dirs, "--count", "3") == 3
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -822,8 +826,8 @@ def test_scan_stops_for_the_manual_step(
 # Phase 06, against synthetic repositories built in tmp_path.
 
 
-def upstream(tmp_path: Path, library: Library) -> Result:
-    phase = upstream_phase(tmp_path / "cache", tmp_path, "sha")
+def upstream(tmp_path: Path, library: Library, host: str | None = None) -> Result:
+    phase = upstream_phase(tmp_path / "cache", tmp_path, "sha", host)
     assert phase.name == "06-upstream"
     return phase.run(library, {})
 
@@ -901,6 +905,62 @@ def test_phase_06_failed_clone_is_an_error(tmp_path: Path) -> None:
     assert not (tmp_path / "cache" / "upstream" / "zlib.git").exists()
 
 
+@pytest.mark.parametrize(
+    "repo",
+    [
+        "https://gitlab.com/libtiff/libtiff",
+        "https://chromium.googlesource.com/webm/libwebp",
+        "http://github.com/madler/zlib",
+        "https://github.com.example/madler/zlib",
+        "git@github.com:madler/zlib.git",
+        "-q",
+    ],
+)
+def test_phase_06_skips_repos_outside_github(tmp_path: Path, repo: str) -> None:
+    result = upstream(tmp_path, Library("zlib", repo, "v{version}"), "github.com")
+    assert result == Result("skipped", "not_github", {"repo": repo})
+    assert not (tmp_path / "cache" / "upstream").exists()
+
+
+def test_phase_06_clones_from_github(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cloned: list[str] = []
+    monkeypatch.setattr(scan_module, "clone_or_fetch", lambda r, d: cloned.append(r))
+    monkeypatch.setattr(scan_module, "tags", lambda d: ["v1.3.1"])
+    repo = "https://github.com/madler/zlib"
+    result = upstream(tmp_path, Library("zlib", repo, "v{version}"), "github.com")
+    assert result.status == "ok"
+    assert cloned == [repo]
+
+
+def test_scan_clones_only_from_github(
+    dirs: Dirs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = make_repo(dirs.episode.parent / "zlib", {"v1.3.1": {}})
+    dirs.map.write_text(f"{','.join(COLUMNS)}\nlibz,zlib,{repo},v{{version}},,,,,,\n")
+    assert scan_module.UPSTREAM_HOST == "github.com"
+    assert run(dirs, "--count", "3") == 0
+    assert "06-upstream: 0 ok, 1 skipped, 0 error" in capsys.readouterr().err
+    [zlib] = dirs.lines("06-upstream")
+    assert (zlib["status"], zlib["reason"], zlib["repo"]) == (
+        "skipped",
+        "not_github",
+        str(repo),
+    )
+    assert not (dirs.cache / "upstream").exists()
+
+
+def test_clone_reads_a_leading_dash_as_a_repo(tmp_path: Path) -> None:
+    clone = tmp_path / "zlib.git"
+    with pytest.raises(GitError, match="repository '-q' does not exist"):
+        clone_or_fetch("-q", clone)
+    result = upstream(tmp_path, Library("zlib", "--template=x", "v{version}"))
+    assert result.status == "error"
+    assert "repository '--template=x' does not exist" in str(result.reason)
+    assert not clone.exists()
+
+
 def test_phase_06_refuses_a_clone_of_another_repo(tmp_path: Path) -> None:
     zlib = make_repo(tmp_path / "zlib", {"v1.3.1": {}})
     ng = make_repo(tmp_path / "zlib-ng", {"2.3.3": {}})
@@ -942,8 +1002,9 @@ def test_stop_between_libraries(tmp_path: Path) -> None:
 
 
 def test_changed_map_after_phase_06_fails_preflight(
-    dirs: Dirs, capsys: pytest.CaptureFixture[str]
+    dirs: Dirs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    monkeypatch.setattr(scan_module, "UPSTREAM_HOST", None)
     repo = make_repo(dirs.episode.parent / "zlib", {"v1.3.1": {}})
     row = f"libz,zlib,{repo},v{{version}},,,,,,"
     dirs.map.write_text(f"{','.join(COLUMNS)}\n{row}\n")
@@ -969,3 +1030,51 @@ def test_changed_map_after_phase_06_fails_preflight(
     (dirs.episode / "episode.json").write_text(json.dumps(recorded))
     assert run(dirs, "--count", "3") == 2
     assert "Delete 06-upstream.jsonl, 07-later.jsonl" in capsys.readouterr().err
+
+
+def test_version_1_episode_passes_preflight(
+    dirs: Dirs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An episode.json from before phase 06 has schema_version 1 and no map
+    sha256; pre-flight accepts it, and phase 06 upgrades it to version 2."""
+    monkeypatch.setattr(scan_module, "UPSTREAM_HOST", None)
+    repo = make_repo(dirs.episode.parent / "zlib", {"v1.3.1": {}})
+    dirs.map.write_text(f"{','.join(COLUMNS)}\nlibz,zlib,{repo},v{{version}},,,,,,\n")
+    dirs.episode.mkdir()
+    v1 = {"schema_version": 1, **episode_inputs(dirs.list, 3), "code_version": "0"}
+    (dirs.episode / "episode.json").write_text(json.dumps(v1))
+
+    assert run(dirs, "--count", "3") == 0
+    assert "pypiscan scan: error" not in capsys.readouterr().err
+    recorded = json.loads((dirs.episode / "episode.json").read_text())
+    assert recorded == v1 | {
+        "schema_version": 2,
+        "library_map_sha256": scan_module._sha256(dirs.map),
+    }
+
+
+def test_phase_06_writes_episode_json_whole_or_not_at_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = tmp_path / "episode.json"
+    record.write_text('{"schema_version": 1}')
+    phase = upstream_phase(tmp_path / "cache", tmp_path, "sha", None)
+    assert phase.finish is not None
+    write_text = Path.write_text
+
+    def interrupted(path: Path, text: str, encoding: str | None = None) -> int:
+        write_text(path, text[:5], encoding=encoding)
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "write_text", interrupted)
+    with pytest.raises(OSError, match="disk full"):
+        phase.finish([], {})
+    monkeypatch.undo()
+    assert record.read_text() == '{"schema_version": 1}'
+
+    phase.finish([], {})
+    assert json.loads(record.read_text()) == {
+        "schema_version": 2,
+        "library_map_sha256": "sha",
+    }
+    assert [p.name for p in tmp_path.iterdir() if p.is_file()] == ["episode.json"]

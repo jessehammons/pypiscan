@@ -57,7 +57,9 @@ def clone_or_fetch(repo: str, directory: Path) -> str:
     an error that names the directory to delete.
     """
     if not directory.exists():
-        git("clone", "--bare", "--filter=blob:none", "--quiet", repo, str(directory))
+        # "--" keeps a repo that starts with "-" from being read as an option.
+        options = ("--bare", "--filter=blob:none", "--quiet")
+        git("clone", *options, "--", repo, str(directory))
         return "clone"
     try:
         url = git("--git-dir", str(directory), "config", "remote.origin.url").strip()
