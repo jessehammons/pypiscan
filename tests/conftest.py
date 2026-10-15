@@ -2,6 +2,9 @@
 
 pytest-socket blocks sockets via ``--disable-socket`` in addopts. The hook
 below rejects its per-test escape hatches so the block can't be bypassed.
+pytest-socket doesn't see a ``git`` subprocess, so an autouse fixture lets
+git reach only local repositories, and keeps a developer's own git settings
+out of the tests (README "Conventions").
 """
 
 import pytest
@@ -10,6 +13,13 @@ pytest_plugins = ["pytester"]
 
 FORBIDDEN_MARKERS = frozenset({"enable_socket"})
 FORBIDDEN_FIXTURES = frozenset({"socket_enabled"})
+
+
+@pytest.fixture(autouse=True)
+def local_git_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:

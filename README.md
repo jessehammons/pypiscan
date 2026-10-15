@@ -315,12 +315,18 @@ Part 2:
    release tags the library's **tags** matches, each with the version it
    names. A library whose **tags** matches no tag is an `error` line, so a
    wrong repo or a misspelled pattern shows up before phase 09 relies on
-   it.
+   it. Version 1 clones only from GitHub: a library whose repo is elsewhere
+   gets a `skipped` line with reason `not_github`, and its map row keeps
+   the real upstream URL.
 7. `07-recognizers` (per library): build a recognizer from each of the
    library's rows that has a kind (see
    [How versions are identified](#how-versions-are-identified)), and list
    them in the library's line. A library with no recognizer gets a
-   `skipped` line with reason `no_recognizer`.
+   `skipped` line with reason `no_recognizer`. It doesn't depend on phase
+   06, because recognizers come from the map, so a library whose clone was
+   skipped or failed still gets them. (4.2 implements this. The runner's
+   rule of skipping an item whose previous line isn't `ok` is for
+   per-package phases.)
 8. `08-fingerprint` (per package): run the recognizers on each shared
    library whose prefix maps to them, giving `fingerprint` records.
 9. `09-cves` (network, per library): candidate CVEs from NVD, by the map's
@@ -418,9 +424,12 @@ Rules:
      `episode.json`, their inputs can't be checked, and the error names
      them to delete.
   5. The library map is expected to change between parts 1 and 2, so it
-     isn't matched from the start. Phase 06 records its sha256; if the map
-     has changed since, the error names phase 06's file and every later one
-     to delete.
+     isn't matched from the start. Phase 06 records its sha256 in
+     `episode.json`, written whole or not at all like a phase file; if the
+     map has changed since, the error names phase 06's file and every later
+     one to delete. The field made `episode.json`'s `schema_version` 2; an
+     episode from version 1 still passes pre-flight, and phase 06 brings it
+     to 2.
 - **One line per package, or per library, per phase**, in list or map
   order: `schema_version`, `name` or `library`, `status` (`ok`, `skipped`
   or `error`), `reason`, and the phase's data. Per-binary results are
@@ -634,8 +643,9 @@ Later: a per-wheel time limit, which needs a subprocess per wheel.
 
 Adding a library means adding rows to the library map, not code.
 
-- **4.1** Phase 06, upstream clones and tags. Clones or fetches every
-  library the map names, and lists the release tags its **tags** matches,
+- **4.1** ✓ Phase 06, upstream clones and tags. Clones or fetches every
+  library the map names whose repository is on GitHub (others are
+  `skipped` with reason `not_github`), and lists the release tags its **tags** matches,
   each with its version; a library whose **tags** matches no tag is an
   `error` line. The loader requires **tags** on every mapped row and
   **identity** empty, and `data/libraries.csv` fills in **tags** for each
@@ -646,10 +656,10 @@ Adding a library means adding rows to the library map, not code.
   module, so dulwich leaves the dependencies. Tests use a small synthetic
   git repository. This item adds the convention's test guard and its ruff
   exception, the one the maintainer has approved; the PR still calls the
-  exception out. **← current**
+  exception out.
 - **4.2** Phase 07, recognizers built from the library map's patterns:
   one line per library listing them, or `skipped` with reason
-  `no_recognizer`.
+  `no_recognizer`. **← current**
 - **4.3** Phase 08, fingerprint with the recognizers and the noise filter.
   Adds `basis` to fingerprint records and bumps their `schema_version`.
   Manual check: compare results against Pillow 12.3.0's
@@ -723,6 +733,15 @@ Adding a library means adding rows to the library map, not code.
   1.7.6 at its 1.7.7 and 1.8.0 tags. The hand-written zlib detector (2.1)
   becomes map rows once they pass its fixtures (2.2), including telling
   zlib from zlib-ng.
+- **Upstreams outside GitHub.** Phase 06 skips seven libraries with
+  reason `not_github`: libtiff (gitlab.com), bzip2 (sourceware.org), aom
+  (aomedia.googlesource.com), libwebp (chromium.googlesource.com),
+  FreeType (gitlab.freedesktop.org), OpenLDAP (git.openldap.org) and
+  PostgreSQL (git.postgresql.org). Adding them means checking each
+  **tags** pattern against the real repository (FreeType's `VER-{version}`
+  has never been checked), and deciding whether a project's official
+  GitHub mirror, where it has one, can stand in for its upstream. It has
+  to land before 6.3 for those libraries to get fixed versions.
 - **Time-to-patch.** How long wheels kept shipping an affected version.
   Needs every release of each affected package, with upload times per file
   (depth, where `scan` is breadth). The clock starts when a fixed library
@@ -754,7 +773,9 @@ Adding a library means adding rows to the library map, not code.
 - Upstream repositories are read with the git command, not dulwich or a
   forge's API. `git tag --contains` answers the range verifier's question
   (6.3) locally, any host works (libtiff is on GitLab, libwebp on
-  googlesource), and nothing needs a token.
+  googlesource), and nothing needs a token. Version 1 clones only from
+  GitHub, though; see "Upstreams outside GitHub" under
+  [Later](#later-tbd).
   - Each repository is a bare, blobless clone in the cache
     (`git clone --bare --filter=blob:none`): every commit and tag, with a
     file's contents fetched the first time it is read. OpenSSL's is about

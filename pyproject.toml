@@ -28,7 +28,6 @@ dev = [
     "pip-audit",
     "deptry",
     "pytest-socket>=0.8.1",
-    "dulwich>=1.2.17",
 ]
 
 [tool.ruff]
@@ -41,6 +40,9 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "PTH", "RUF", "S", "BLE", "DTZ"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
+# The one module that runs git (README "Conventions"): S603 flags every
+# subprocess call, however it is made.
+"src/pypiscan/git.py" = ["S603"]
 
 [tool.pyright]
 typeCheckingMode = "standard"

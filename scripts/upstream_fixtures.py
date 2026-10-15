@@ -18,7 +18,6 @@ working tree, so it needs the network and runs outside pytest:
 """
 
 import argparse
-import io
 import re
 import sys
 import tempfile
@@ -26,14 +25,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from dulwich import porcelain
-from dulwich.object_store import tree_lookup_path
-from dulwich.objects import Blob, Commit
-from dulwich.refs import Ref
-from dulwich.repo import Repo
-
 from pypiscan.detectors import DETECTORS
 from pypiscan.fingerprint import Detector
+from pypiscan.git import GitError, clone_or_fetch, git, tags
 
 FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "upstream"
 
@@ -135,32 +129,36 @@ def extract(text: str, source: Source) -> tuple[int, str] | None:
     return line, "".join(parts)
 
 
-def _read(repo: Repo, commit: Commit, path: str) -> str | None:
-    try:
-        _, sha = tree_lookup_path(repo.__getitem__, commit.tree, path.encode())
-    except KeyError:
+def _read(repo: Path, commit: str, path: str) -> str | None:
+    listed = git("-C", str(repo), "ls-tree", commit, "--", path).split()
+    if not listed:
         return None
-    blob = repo[sha]
-    if not isinstance(blob, Blob):
+    if listed[1] != "blob":
         raise ExtractError(f"{path} is not a file")
-    return blob.data.decode("latin-1")
+    return git("-C", str(repo), "cat-file", "blob", listed[2], encoding="latin-1")
+
+
+def _commit(repo: Path, tag: str) -> tuple[int, str]:
+    """The commit time and id of the commit ``tag`` points at."""
+    try:
+        out = git("-C", str(repo), "log", "-1", "--format=%ct %H", f"{tag}^{{commit}}")
+    except GitError:
+        raise ExtractError(f"tag {tag} does not point at a commit") from None
+    time, commit = out.split()
+    return int(time), commit
 
 
 def rows(
-    repo: Repo, tag_pattern: re.Pattern[str], sources: list[Source]
+    repo: Path, tag_pattern: re.Pattern[str], sources: list[Source]
 ) -> tuple[list[tuple[str, str, str]], list[str]]:
     """Return ``(tag, file:line, string)`` rows for every release tag, oldest
     tagged commit first, and the selected tags where no source was found."""
-    tags: list[tuple[int, str, Commit]] = []
-    for ref in repo.refs.keys(base=Ref(b"refs/tags")):
-        if tag_pattern.fullmatch(tag := ref.decode()):
-            commit = repo[repo.get_peeled(Ref(b"refs/tags/" + ref))]
-            if not isinstance(commit, Commit):
-                raise ExtractError(f"tag {tag} does not point at a commit")
-            tags.append((commit.commit_time, tag, commit))
+    selected = [
+        (*_commit(repo, tag), tag) for tag in tags(repo) if tag_pattern.fullmatch(tag)
+    ]
     found: list[tuple[str, str, str]] = []
     empty: list[str] = []
-    for _, tag, commit in sorted(tags, key=lambda t: t[:2]):
+    for _, commit, tag in sorted(selected, key=lambda t: (t[0], t[2])):
         before = len(found)
         for source in sources:
             text = _read(repo, commit, source.file)
@@ -178,14 +176,14 @@ def rows(
     return found, empty
 
 
-def write_fixture(repo: Repo, name: str, out_dir: Path) -> None:
+def write_fixture(repo: Path, name: str, out_dir: Path) -> None:
     library = LIBRARIES[name]
     found, empty = rows(repo, library.tags, cited_sources(library.repo, DETECTORS))
     out = out_dir / f"{name}.tsv"
     lines = ["tag\tlocation\tstring", *("\t".join(row) for row in found)]
     out.write_text("\n".join(lines) + "\n", encoding="ascii")
-    tags = len({tag for tag, _, _ in found})
-    print(f"{name}: {tags} tags, {len(found)} rows -> {out}", file=sys.stderr)
+    count = len({tag for tag, _, _ in found})
+    print(f"{name}: {count} tags, {len(found)} rows -> {out}", file=sys.stderr)
     if empty:
         print(f"{name}: no cited string at: {' '.join(empty)}", file=sys.stderr)
 
@@ -198,17 +196,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.repo is not None:
-            with Repo(str(args.repo)) as repo:
-                write_fixture(repo, args.library, args.out_dir)
+            write_fixture(args.repo, args.library, args.out_dir)
         else:
             url = f"https://github.com/{LIBRARIES[args.library].repo}"
             with tempfile.TemporaryDirectory(prefix="upstream-fixtures-") as tmp:
                 print(f"cloning {url} into {tmp}", file=sys.stderr)
-                with porcelain.clone(
-                    url, tmp, bare=True, checkout=False, errstream=io.BytesIO()
-                ) as repo:
-                    write_fixture(repo, args.library, args.out_dir)
-    except ExtractError as e:
+                repo = Path(tmp) / "repo.git"
+                clone_or_fetch(url, repo)
+                write_fixture(repo, args.library, args.out_dir)
+    except (ExtractError, GitError) as e:
         print(f"upstream_fixtures: error: {e}", file=sys.stderr)
         return 1
     return 0
