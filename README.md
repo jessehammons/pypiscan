@@ -324,9 +324,7 @@ Part 2:
    them in the library's line. A library with no recognizer gets a
    `skipped` line with reason `no_recognizer`. It doesn't depend on phase
    06, because recognizers come from the map, so a library whose clone was
-   skipped or failed still gets them. (4.2 implements this. The runner's
-   rule of skipping an item whose previous line isn't `ok` is for
-   per-package phases.)
+   skipped or failed still gets them.
 8. `08-fingerprint` (per package): run the recognizers on each shared
    library whose prefix maps to them, giving `fingerprint` records.
 9. `09-cves` (network, per library): candidate CVEs from NVD, by the map's
@@ -430,15 +428,17 @@ Rules:
      one to delete. The field made `episode.json`'s `schema_version` 2; an
      episode from version 1 still passes pre-flight, and phase 06 brings it
      to 2.
-- **One line per package, or per library, per phase**, in list or map
-  order: `schema_version`, `name` or `library`, `status` (`ok`, `skipped`
-  or `error`), `reason`, and the phase's data. Per-binary results are
-  nested inside the package's line, in the `inspect`, `strings` and
-  `fingerprint` record formats. A package whose line in the previous
-  per-package phase isn't `ok` gets a `skipped` line, never a missing one,
-  whose reason is the phase where its line first wasn't `ok` (such as
-  `02-fetch`). Every finished phase file has exactly one line per package
-  or library. A bad zip or malformed ELF becomes an `error` line, not a crash.
+- **One line per package, or per library, per phase**, in list or map order:
+  `schema_version`, `name` or `library`, `status` (`ok`, `skipped` or
+  `error`), `reason`, and the phase's data. Per-binary results are nested
+  inside the package's line, in the `inspect`, `strings` and `fingerprint`
+  record formats. A package whose line in the previous per-package phase isn't
+  `ok` gets a `skipped` line, never a missing one, whose reason is the phase
+  where its line first wasn't `ok` (such as `02-fetch`). Per-library phases
+  never skip a library over an earlier line; one that needs an earlier phase's
+  result reads that line itself. Every finished phase file has exactly one
+  line per package or library. A bad zip or malformed ELF becomes an `error`
+  line, not a crash.
 - **Phase files are written whole or not at all.** A phase writes
   `NN-<phase>.jsonl.partial` and renames it to `NN-<phase>.jsonl` when it
   finishes. A rerun skips finished phases. There is no resuming partway
@@ -644,26 +644,25 @@ Later: a per-wheel time limit, which needs a subprocess per wheel.
 Adding a library means adding rows to the library map, not code.
 
 - **4.1** ✓ Phase 06, upstream clones and tags. Clones or fetches every
-  library the map names whose repository is on GitHub (others are
-  `skipped` with reason `not_github`), and lists the release tags its **tags** matches,
-  each with its version; a library whose **tags** matches no tag is an
-  `error` line. The loader requires **tags** on every mapped row and
-  **identity** empty, and `data/libraries.csv` fills in **tags** for each
-  library from its repository's tags and drops the two identities the
-  first map had. Upstream repositories are read with the git command, as
-  described in [Conventions](#conventions), and
-  `scripts/upstream_fixtures.py` (2.2) moves from dulwich to the same git
-  module, so dulwich leaves the dependencies. Tests use a small synthetic
-  git repository. This item adds the convention's test guard and its ruff
-  exception, the one the maintainer has approved; the PR still calls the
-  exception out.
-- **4.2** Phase 07, recognizers built from the library map's patterns:
+  library the map names whose repository is on GitHub (others are `skipped`
+  with reason `not_github`), and lists the release tags its **tags** matches,
+  each with its version; a library whose **tags** matches no tag is an `error`
+  line. The loader requires **tags** on every mapped row and **identity**
+  empty, and `data/libraries.csv` fills in **tags** for each library from its
+  repository's tags and drops the two identities the first map had. Upstream
+  repositories are read with the git command, as described in
+  [Conventions](#conventions), and `scripts/upstream_fixtures.py` (2.2) moves
+  from dulwich to the same git module, so dulwich leaves the dependencies.
+  Tests use a small synthetic git repository. This item adds the convention's
+  test guard and its ruff exception, the one the maintainer has approved; the
+  PR still calls the exception out.
+- **4.2** ✓ Phase 07, recognizers built from the library map's patterns:
   one line per library listing them, or `skipped` with reason
-  `no_recognizer`. **← current**
+  `no_recognizer`.
 - **4.3** Phase 08, fingerprint with the recognizers and the noise filter.
   Adds `basis` to fingerprint records and bumps their `schema_version`.
   Manual check: compare results against Pillow 12.3.0's
-  `.github/dependencies.json`.
+  `.github/dependencies.json`. **← current**
 - **4.4** *(maintainer input)* The libraries the map marks as identified
   with no recognizer, such as libwebp, brotli, Little CMS, FreeType and
   libpq, which embed no version string: choose a detection method for each
