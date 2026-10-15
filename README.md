@@ -77,6 +77,10 @@ Each finding also carries the basis of the version it rests on (see
 is best effort, so before anything is sent to a maintainer, the bundled
 library and its version are confirmed by hand, whatever the basis.
 
+A bare version is only a hint. When it is a finding's basis, another
+source must confirm the version before the finding is sent: the package's
+build scripts, an SBOM in the wheel, or a library string found by hand.
+
 ## Sources of truth
 
 - **The wheel's binaries** are what users actually run, and the primary
@@ -120,7 +124,10 @@ strongest first:
   bare version doesn't choose between them. Nothing around a bare version
   anchors it, so it must be three or more numbers separated by dots. That
   keeps out other libraries' header strings, such as `1.3.1.zlib-ng` in
-  libpng, and numbers such as `001.000` in harfbuzz.
+  libpng, and numbers such as `001.000` in harfbuzz. A bare version is a
+  hint, the weakest evidence that sets a version: a finding that rests on
+  one needs another source to confirm the version (see
+  [How findings are classified](#how-findings-are-classified)).
 - **Header string**: a version macro from the library's public header, such
   as `ZLIB_VERSION`. Code that *calls* a library embeds it; for example,
   zlib's `deflateInit()` passes `ZLIB_VERSION` to the library. It shows
@@ -708,7 +715,8 @@ Adding a library means adding rows to the library map, not code.
 
 - **7.1** Phase 10, `match`: compare fingerprints against the CVE table and
   write candidates with their evidence level into the episode, which is
-  outside the repository.
+  outside the repository. A candidate whose version's basis is
+  `bare_version` is marked as needing another source to confirm it.
 - **7.2** Evidence for levels 2 and 3: whether the affected function is
   present in the binary, and which extension modules import functions from
   the bundled library.
