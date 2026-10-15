@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 
 from pypiscan import fingerprint
 from pypiscan.fetch import download
+from pypiscan.fingerprint_report import report as fingerprint_report
 from pypiscan.git import GitError, clone_or_fetch, tags
 from pypiscan.library_map import (
     SKIP,
@@ -644,6 +645,23 @@ def manual_step(episode: Path, rows: Sequence[MapRow], err: TextIO) -> int:
     return EXIT_MANUAL_STEP
 
 
+def write_fingerprint_report(
+    episode: Path,
+    packages: Sequence[Package],
+    recognizers: Mapping[str, Line],
+    rows: Sequence[MapRow],
+) -> None:
+    """Rewrite fingerprint-report.md from phases 05, 07 and 08."""
+    text = fingerprint_report(
+        packages,
+        _read_lines(episode / "05-libraries.jsonl"),
+        recognizers,
+        _read_lines(episode / "08-fingerprint.jsonl"),
+        rows,
+    )
+    (episode / "fingerprint-report.md").write_text(text, encoding="utf-8")
+
+
 def scan(
     package_list: Path,
     library_map: Path,
@@ -699,6 +717,9 @@ def scan(
         recognizers = _read_lines(episode / "07-recognizers.jsonl", "library")
         part_3 = [fingerprint_phase(list(recognizers.values()))]
         names = [phase.name for phase in part_1]
-        return run_phases(episode, packages, part_3, stop, err, finished=names)
+        status = run_phases(episode, packages, part_3, stop, err, finished=names)
+        if (episode / "08-fingerprint.jsonl").is_file():
+            write_fingerprint_report(episode, packages, recognizers, rows)
+        return status
     finally:
         signal.signal(signal.SIGINT, handler)

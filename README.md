@@ -433,6 +433,11 @@ Part 2:
    has such a recognizer, phase 08 reads the file from the wheel at phase
    02's path and decodes the function (see
    [Version function machine code](#version-function-machine-code)).
+   Once phase 08 is finished, every run rewrites `fingerprint-report.md`
+   in the episode from phases 05, 07 and 08, as it rewrites
+   `library-map-todo.csv`: for each package, every `.libs/` file and each
+   library its prefix maps to, with the version and its basis, or why
+   there is none (roadmap 4.5).
 9. `09-cves` (network, per library): candidate CVEs from NVD, by the map's
    CPE, and OSV, by its OSV identifier, checked against the curated CVE
    table (section 6). Fixed versions come from the release tags that
@@ -795,14 +800,14 @@ again only rows.
     libwebp's; and `libbrotlicommon`, `libssl`, `libgeos` and krb5's
     `libgssapi_krb5`, `libk5crypto` and `libkrb5support`, which have no
     version function either. 4.5 reports them.
-- **4.5** A fingerprint report. Once phase 08 is finished, every run
+- **4.5** ✓ A fingerprint report. Once phase 08 is finished, every run
   rewrites `fingerprint-report.md` in the episode from phases 05, 07 and
   08, as it rewrites `library-map-todo.csv`. It lists every `.libs/` file
   each package carries and, for each library its prefix maps to, the
   version and the basis it rests on, or why there is none: the map gives
   the library no recognizer, or its recognizers matched nothing. A prefix
   marked `skip` is listed as skipped. Signals and gaps are visible side by
-  side, and no version is shown without its basis. **← current**
+  side, and no version is shown without its basis.
 - **4.6** Version function machine code, as described in
   [Version function machine code](#version-function-machine-code): the
   `version_function_machine_code` kind and its pattern forms in the loader,
@@ -813,6 +818,7 @@ again only rows.
   Pillow 12.3.0, psycopg2-binary 2.9.13 and pyzmq 27.2.0 give the versions
   their build scripts pin: libwebp 1.6.0, brotli 1.2.0, libavif 1.4.2,
   dav1d 1.5.3 (pinned by libavif 1.4.2), libpq 17.11 and libzmq 4.3.5.
+  **← current**
 
 ### 5. SBOM comparison
 

@@ -821,6 +821,8 @@ def test_scan_stops_for_the_manual_step(
     assert "\n  libgfortran\n" in capsys.readouterr().err
     assert todo.read_text() == f"{header}\nlibgfortran,,,,,,,,,\n"
     assert not list(dirs.episode.glob("06-*"))
+    # Stopping at the manual step writes no fingerprint report.
+    assert not (dirs.episode / "fingerprint-report.md").exists()
 
     # Once every prefix is listed, the todo is empty and phase 06 runs.
     dirs.map.write_text(f"{header}\n{png}\nlibgfortran,skip,,,,,,,,\n")
@@ -867,6 +869,21 @@ def test_scan_stops_for_the_manual_step(
     err = capsys.readouterr().err
     assert "08-fingerprint: already finished, skipped" in err
     assert err.count("05-libraries: already finished, skipped") == 1
+
+    # Every run with phase 08 finished rewrites the fingerprint report.
+    report = dirs.episode / "fingerprint-report.md"
+    text = report.read_text()
+    assert "## demo 1.0\n\n`demo.whl`\n" in text
+    row = "| libpng16-1a2b3c4d.so.16.58.0 | libpng | 1.6.58 | library_string |  |"
+    assert row in text
+    assert "| libgfortran-040039e1.so.5.0.0 | skip | — | — | not tracked |" in text
+    assert "## missing 9.9\n\nskipped: 01-resolve\n" in text
+    report.write_text("stale")
+    assert run(dirs, "--count", "3") == 0
+    assert report.read_text() == text
+    report.unlink()
+    assert run(dirs, "--count", "3") == 0
+    assert report.read_text() == text
 
 
 # Phase 06, against synthetic repositories built in tmp_path.
@@ -1317,3 +1334,4 @@ def test_stop_during_part_2_leaves_no_phase_08(
     assert run(dirs, "--count", "3") == EXIT_INTERRUPTED
     assert "interrupted after the last phase finished" in capsys.readouterr().err
     assert not list(dirs.episode.glob("08-*"))
+    assert not (dirs.episode / "fingerprint-report.md").exists()
