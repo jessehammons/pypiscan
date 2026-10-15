@@ -764,6 +764,32 @@ Adding a library means adding rows to the library map, not code.
   publication) and stops at the first release whose wheel for that
   platform bundles a fixed version. Wheels still unpatched are counted as
   unfinished, not dropped. A pilot would follow libwebp CVE-2023-4863.
+- **One string claimed by two libraries.** A prefix can map to several
+  libraries, and phase 08 resolves each library under it on its own. If
+  recognizers of two libraries both match one string in a file, each gets
+  a `contains` record, and nothing marks the pair for checking. No prefix
+  in the current map has recognizers for more than one library, so this
+  can't happen yet, but it needs a guard before one does. Two candidates:
+  `tests/test_recognizer_examples.py` could require that no recognizer of
+  another library under an example's prefix matches the example at all
+  (today it checks only that none reads a different version from it), and
+  phase 08 could mark records whose evidence shares a string with another
+  library's. A derivative that carries the original's strings, such as
+  zlib-ng with zlib's banners, is a separate case, under "Checking
+  patterns at every release tag".
+- **Patterns that don't name their library.** Most library-string
+  patterns name the library, but two don't: bzip2's `{version}, {any}` and
+  geos's `{version}-CAPI-{any}`. Both strings are the libraries' own; the
+  weakness is the pattern, whose literal text is only `, ` or `-CAPI-`.
+  Any string that starts with a version and a comma matches bzip2's. In a
+  libfreetype file that also holds bzip2's real string, such a string
+  gives `version: null` and `conflict: true`; in one built without bzip2,
+  it gives a bzip2 version that is wrong and unflagged. Pillow 12.3.0's
+  libfreetype has no such string. Options: a narrower placeholder, such as
+  one for the date in bzip2's `1.0.8, 13-Jul-2019`; a loader rule that a
+  library-string pattern's literal text contains the library's name,
+  ignoring case, which every other current pattern meets; or counting
+  such patterns only as hints, like bare versions.
 
 ## Data handling and disclosure
 
