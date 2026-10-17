@@ -4,7 +4,7 @@ Inventories the compiled C libraries bundled inside PyPI wheels, identifies
 their versions from the binaries themselves, and matches those versions
 against known CVEs.
 
-Status: early development. `inspect` works; see the [Roadmap](#roadmap) for
+Status: early development. see the [Roadmap](#roadmap) for
 what is being built and in what order.
 
 ## Why
