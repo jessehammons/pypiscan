@@ -894,13 +894,38 @@ def test_scan_stops_for_the_manual_step(
     row = "| libpng16-1a2b3c4d.so.16.58.0 | libpng | 1.6.58 | library_string |  |"
     assert row in text
     assert "| libgfortran-040039e1.so.5.0.0 | skip | — | — | not tracked |" in text
-    assert "## missing 9.9\n\nskipped: 01-resolve\n" in text
+    assert "## missing 9.9\n\nerror at 01-resolve: HTTP 404\n" in text
     report.write_text("stale")
     assert run(dirs, "--count", "3") == 0
     assert report.read_text() == text
     report.unlink()
     assert run(dirs, "--count", "3") == 0
     assert report.read_text() == text
+
+
+def test_report_shows_why_a_package_stopped_at_phase_02(
+    dirs: Dirs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def too_large(package: Package, earlier: Mapping[str, Line]) -> Result:
+        if package.name == "puredemo":
+            return Result("skipped", "too_large")
+        return Result("ok")
+
+    def with_too_large(client: object, cache_dir: Path, episode: Path) -> list[Phase]:
+        stubs = stub_phases(client, cache_dir, episode)
+        return [stubs[0], Phase("02-fetch", too_large), *stubs[2:]]
+
+    monkeypatch.setattr(scan_module, "phases", with_too_large)
+    monkeypatch.setattr(scan_module, "UPSTREAM_HOST", None)
+    repo = make_repo(dirs.episode.parent / "libpng", {"v1.6.58": {}})
+    png = f"libpng16,libpng,{repo},v{{version}},library_string,"
+    png += "libpng version {version},p.c,,,"
+    dirs.map.write_text(f"{','.join(COLUMNS)}\n{png}\nlibgfortran,skip,,,,,,,,\n")
+    assert run(dirs, "--count", "3") == 0
+    [_, pure, _] = dirs.lines("08-fingerprint")
+    assert (pure["status"], pure["reason"]) == ("skipped", "02-fetch")
+    text = (dirs.episode / "fingerprint-report.md").read_text()
+    assert "## puredemo 3.1\n\nskipped at 02-fetch: too_large\n" in text
 
 
 # Phase 06, against synthetic repositories built in tmp_path.

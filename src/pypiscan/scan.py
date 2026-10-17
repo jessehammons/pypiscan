@@ -744,14 +744,16 @@ def manual_step(episode: Path, rows: Sequence[MapRow], err: TextIO) -> int:
 def write_fingerprint_report(
     episode: Path,
     packages: Sequence[Package],
+    part_1: Sequence[str],
     recognizers: Mapping[str, Line],
     rows: Sequence[MapRow],
     ambiguous: Ambiguous,
 ) -> None:
-    """Rewrite fingerprint-report.md from phases 05, 07 and 08."""
+    """Rewrite fingerprint-report.md from part 1's phases (01 to 05), 07 and
+    08; ``part_1`` names part 1's phases."""
     text = fingerprint_report(
         packages,
-        _read_lines(episode / "05-libraries.jsonl"),
+        {name: _read_lines(episode / f"{name}.jsonl") for name in part_1},
         recognizers,
         _read_lines(episode / "08-fingerprint.jsonl"),
         rows,
@@ -818,7 +820,9 @@ def scan(
         names = [phase.name for phase in part_1]
         status = run_phases(episode, packages, part_3, stop, err, finished=names)
         if (episode / "08-fingerprint.jsonl").is_file():
-            write_fingerprint_report(episode, packages, recognizers, rows, ambiguous)
+            write_fingerprint_report(
+                episode, packages, names, recognizers, rows, ambiguous
+            )
         return status
     finally:
         signal.signal(signal.SIGINT, handler)

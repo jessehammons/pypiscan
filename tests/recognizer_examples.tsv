@@ -24,3 +24,10 @@ libpng16				1.3.1.zlib-ng	pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manyli
 libharfbuzz				001.000	pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	pillow.libs/libharfbuzz-172d1f63.so.0.61421.0
 libcrypto				OpenSSL X9.42 DH implementation	psycopg2_binary-2.9.13-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl	psycopg2_binary.libs/libcrypto-fb8d5b21.so.3
 libcrypto				1.2.7	psycopg2_binary-2.9.13-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl	psycopg2_binary.libs/libcrypto-fb8d5b21.so.3
+libfreetype				2,  0.25?528411	numpy-2.5.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	numpy/random/mtrand.cpython-312-x86_64-linux-gnu.so
+libfreetype				4,  9.00	numpy-2.5.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	numpy/random/mtrand.cpython-312-x86_64-linux-gnu.so
+libfreetype				9, -0.52	numpy-2.5.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	numpy/random/mtrand.cpython-312-x86_64-linux-gnu.so
+libfreetype				04,  4.6	numpy-2.5.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	numpy/random/mtrand.cpython-312-x86_64-linux-gnu.so
+libfreetype				34, -1.8	numpy-2.5.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	numpy/random/mtrand.cpython-312-x86_64-linux-gnu.so
+libfreetype				67,  7.2	numpy-2.5.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	numpy/random/_generator.cpython-312-x86_64-linux-gnu.so
+libfreetype				605, 0.4	numpy-2.5.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	numpy/random/_generator.cpython-312-x86_64-linux-gnu.so

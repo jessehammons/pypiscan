@@ -182,12 +182,13 @@ count, and known noise is removed: compiler and build notes (`GCC:`,
 (`/opt/_internal/`) and object identifiers. A string is an object
 identifier when every version-like token in it has six or more
 dot-separated parts, such as OpenSSL's
-`AES-256-CBC:AES256:2.16.840.1.101.3.4.1.42`. Release versions can have
-five (numpy's `OpenBLAS 0.3.34.106.0 …`), and a noise rule that drops a
-real version hides it from matching too, so a string that also holds a
-token of two to five parts, such as `ANSI X9.62`, is kept, along with a
-few five-part spec references and OIDs. The noise list grows as the
-library report shows more.
+`AES-256-CBC:AES256:2.16.840.1.101.3.4.1.42`. Versions in binaries can
+have five (numpy's `OpenBLAS 0.3.34.106.0 …`, which isn't a release; see
+"Versions that aren't releases" under [Later](#later-tbd)), and a noise
+rule that drops a real version hides it from matching too, so a string
+that also holds a token of two to five parts, such as `ANSI X9.62`, is
+kept, along with a few five-part spec references and OIDs. The noise list
+grows as the library report shows more.
 `strings` output and phase 04 keep everything; the filter applies where
 strings are used, in the library report (phase 05) and in matching.
 
@@ -479,6 +480,8 @@ Part 2:
    `library-map-todo.csv`: for each package, every `.libs/` file and each
    library its prefix maps to, with the version and its basis, marking an
    ambiguous version, or why there is none (roadmap 4.5).
+   A package that wasn't scanned shows the phase where it stopped and
+   that phase's reason, such as `skipped at 02-fetch: too_large`.
 9. `09-cves` (network, per library): candidate CVEs from NVD, by the map's
    CPE, and OSV, by its OSV identifier, checked against the curated CVE
    table (section 6). Fixed versions come from the release tags that
@@ -495,7 +498,7 @@ the package list. One row per prefix, library and way of identifying it:
 | prefix | library | repo | tags | kind | pattern | identity_file | identity | cpe | osv |
 |---|---|---|---|---|---|---|---|---|---|
 | `libtiff` | `libtiff` | `https://gitlab.com/libtiff/libtiff` | `v{version}` | `library_string` | `LIBTIFF, Version {version}` | `libtiff/tiffvers.h.in` | | `libtiff:libtiff` | … |
-| `libfreetype` | `bzip2` | `https://sourceware.org/git/bzip2.git` | `bzip2-{version}` | `library_string` | `{version}, {any}` | `bzlib_private.h` | | `bzip:bzip2` | … |
+| `libfreetype` | `bzip2` | `https://sourceware.org/git/bzip2.git` | `bzip2-{version}` | `library_string` | `{version}, {any}-{any}-20{any}` | `bzlib_private.h` | | `bzip:bzip2` | … |
 | `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | `build_path` | `{any}/openjpeg-{version}/{any}` | | | `uclouvain:openjpeg` | … |
 | `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | `bare_version` | `{version}` | `src/lib/openjp2/opj_config_private.h.cmake.in` | | `uclouvain:openjpeg` | … |
 | `libwebp` | `libwebp` | `https://chromium.googlesource.com/webm/libwebp` | `v{version}` | `version_function_machine_code` | `WebPGetDecoderVersion -> bits *.8.8` | `src/dec/vp8_dec.c` | | `webmproject:libwebp` | … |
@@ -966,25 +969,61 @@ again only rows.
   zlib-ng with zlib's banners, is a separate case, under "Checking
   patterns at every release tag".
 - **Patterns that don't name their library.** Most library-string
-  patterns name the library, but two don't: bzip2's `{version}, {any}` and
-  geos's `{version}-CAPI-{any}`. Both strings are the libraries' own; the
-  weakness is the pattern, whose literal text is only `, ` or `-CAPI-`.
-  Any string that starts with a version and a comma matches bzip2's. In a
-  libfreetype file that also holds bzip2's real string, such a string
-  gives `version: null` and `conflict: true`; in one built without bzip2,
-  it gives a bzip2 version that is wrong and unflagged. Pillow 12.3.0's
-  libfreetype has no such string. Options: a narrower placeholder, such as
-  one for the date in bzip2's `1.0.8, 13-Jul-2019`; a loader rule that a
+  patterns name the library, but two don't: bzip2's and geos's
+  `{version}-CAPI-{any}`. Both strings are the libraries' own; the
+  weakness is the pattern. bzip2's was `{version}, {any}`, which any
+  string starting with a version and a comma matches: run over every
+  binary outside `.libs/` in a `--count 20` episode, it matched seven
+  strings in numpy 2.5.4's `mtrand` and `_generator`, such as
+  `9, -0.52`. It is now narrowed to `{version}, {any}-{any}-20{any}`,
+  which `BZ_VERSION`'s dated form (`1.0.8, 13-Jul-2019`) fits at every
+  release from 1.0.1 on; earlier releases have no date and give
+  nothing. geos's literal text is still only `-CAPI-`, so in a
+  `libgeos_c` file a string with that text and a leading version would
+  give a wrong, unflagged geos version. Options: a loader rule that a
   library-string pattern's literal text contains the library's name,
   ignoring case, which every other current pattern meets; or counting
   such patterns only as hints, like bare versions.
 - **Tags that aren't releases.** Phase 06 lists every tag its
   **tags** pattern matches, so pre-release tags are listed as
-  versions (`lcms2.19rc1` as 2.19rc1), and an odd tag name can give a
-  version that never existed: lcms2's 2.7 is tagged `lcms2-2.7`,
-  which `lcms{version}` lists as 2.2.7. The range verifier (6.3)
-  reads these lists, so before it relies on them, each library's list
-  needs checking against its real releases.
+  versions (`lcms2.19rc1` as 2.19rc1), and an odd tag name can give
+  a version that never existed: lcms2's 2.7 is tagged `lcms2-2.7`,
+  which `lcms{version}` lists as 2.2.7. A release tagged another way
+  is missed: lcms2's 2.11 is tagged only `2.11`. The range verifier
+  (6.3) reads these lists, so before it relies on them, each
+  library's list needs checking against its real releases.
+- **Versions that aren't releases.** Some builds stamp a library
+  with a version no release has. numpy 2.5.4's OpenBLAS says
+  `OpenBLAS 0.3.34.106.0`: scipy-openblas builds OpenBLAS at a
+  commit and writes its own package version (the tag, the commits
+  since it and a build number) into OpenBLAS's `VERSION`, so this is
+  OpenBLAS 106 commits after 0.3.34. Compared as a version it falls
+  between 0.3.34 and 0.3.35, so 7.1 may flag a CVE whose fix is
+  among those 106 commits but won't miss one fixed later.
+  openblas-libs records each build's exact commit in
+  `openblas_commit.txt`, which 6.3's fix-commit check could use.
+  scipy 1.18.1's says `OpenBLAS 0.3.31.dev`, OpenBLAS's own version
+  on its development branch between the 0.3.31 and 0.3.32 releases;
+  the string doesn't say which commit was built. It shows OpenBLAS's
+  own version because openblas-libs began writing its package
+  version into `VERSION` only in March 2026, after that build.
+- **Libraries from the build image's packages.** auditwheel copies every
+  library a wheel's binaries load, including the build image's own
+  distribution packages. psycopg2-binary 2.9.13 builds OpenSSL, OpenLDAP
+  and libpq from source, but installs krb5 and Cyrus SASL with `yum` on
+  its manylinux2014 (CentOS 7) image, so its krb5 1.15.1 and cyrus-sasl
+  2.1.26 are CentOS 7's packages. psycopg-binary 3.3.6 carries
+  byte-identical copies (the same auditwheel hashes, such as
+  `libkrb5-fcafa220`). A distribution backports security fixes without
+  changing the version, so an upstream CVE range can flag a fix the
+  package already has. CentOS 7 reached end of life in June 2024, so
+  fixes released after that weren't backported. Level 2 (see
+  [How findings are classified](#how-findings-are-classified)) needs an
+  upstream build, so such a library needs a way to be recognized as a
+  distribution build. One candidate is a `.gnu_debuglink` section, which
+  RPM's debuginfo split adds: psycopg2-binary's krb5 and SASL files have
+  one and its libraries built from source don't, though any build that
+  splits off debug info adds one.
 
 ## Data handling and disclosure
 
