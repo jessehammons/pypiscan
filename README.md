@@ -407,6 +407,9 @@ An SBOM is a claim, and pypiscan treats it as one:
   [Later](#later-tbd)). The claim rests on which package owns the
   file's path, not on its bytes, so a library a build installed over a
   packaged file would still be claimed.
+- A build can change a wheel after auditwheel writes its SBOM:
+  numba 0.68.0's deletes `numba.libs/` after repair, so its SBOM
+  names a libgomp the wheel doesn't carry.
 - A project's SBOM generated from its build scripts isn't a second
   source beside them, and it isn't a list of what one wheel carries.
 - `scope` is recorded, never interpreted: cargo-cyclonedx marks build
