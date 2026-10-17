@@ -182,12 +182,13 @@ count, and known noise is removed: compiler and build notes (`GCC:`,
 (`/opt/_internal/`) and object identifiers. A string is an object
 identifier when every version-like token in it has six or more
 dot-separated parts, such as OpenSSL's
-`AES-256-CBC:AES256:2.16.840.1.101.3.4.1.42`. Release versions can have
-five (numpy's `OpenBLAS 0.3.34.106.0 …`), and a noise rule that drops a
-real version hides it from matching too, so a string that also holds a
-token of two to five parts, such as `ANSI X9.62`, is kept, along with a
-few five-part spec references and OIDs. The noise list grows as the
-library report shows more.
+`AES-256-CBC:AES256:2.16.840.1.101.3.4.1.42`. Versions in binaries can
+have five (numpy's `OpenBLAS 0.3.34.106.0 …`, which isn't a release; see
+"Versions that aren't releases" under [Later](#later-tbd)), and a noise
+rule that drops a real version hides it from matching too, so a string
+that also holds a token of two to five parts, such as `ANSI X9.62`, is
+kept, along with a few five-part spec references and OIDs. The noise list
+grows as the library report shows more.
 `strings` output and phase 04 keep everything; the filter applies where
 strings are used, in the library report (phase 05) and in matching.
 
@@ -982,11 +983,22 @@ again only rows.
   such patterns only as hints, like bare versions.
 - **Tags that aren't releases.** Phase 06 lists every tag its
   **tags** pattern matches, so pre-release tags are listed as
-  versions (`lcms2.19rc1` as 2.19rc1), and an odd tag name can give a
-  version that never existed: lcms2's 2.7 is tagged `lcms2-2.7`,
-  which `lcms{version}` lists as 2.2.7. The range verifier (6.3)
-  reads these lists, so before it relies on them, each library's list
-  needs checking against its real releases.
+  versions (`lcms2.19rc1` as 2.19rc1), and an odd tag name can give
+  a version that never existed: lcms2's 2.7 is tagged `lcms2-2.7`,
+  which `lcms{version}` lists as 2.2.7. A release tagged another way
+  is missed: lcms2's 2.11 is tagged only `2.11`. The range verifier
+  (6.3) reads these lists, so before it relies on them, each
+  library's list needs checking against its real releases.
+- **Versions that aren't releases.** Some builds stamp a library
+  with a version no release has. numpy 2.5.4's OpenBLAS says
+  `OpenBLAS 0.3.34.106.0`: scipy-openblas builds OpenBLAS at a
+  commit and writes its own package version (the tag, the commits
+  since it and a build number) into OpenBLAS's `VERSION`, so this
+  is OpenBLAS 106 commits after 0.3.34. Compared as a version it
+  falls between 0.3.34 and 0.3.35, so 7.1 may flag a CVE whose fix
+  is among those 106 commits but won't miss one fixed later.
+  openblas-libs records each build's exact commit in
+  `openblas_commit.txt`, which 6.3's fix-commit check could use.
 
 ## Data handling and disclosure
 
