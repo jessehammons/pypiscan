@@ -11,6 +11,8 @@ import importlib.metadata
 import json
 import re
 import signal
+import zipfile
+import zlib
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
@@ -18,16 +20,21 @@ from pathlib import Path
 from typing import Protocol, TextIO, cast
 from urllib.parse import urlsplit
 
-from pypiscan import fingerprint
+from elftools.common.exceptions import ELFError
+
+from pypiscan import fingerprint, version_function
 from pypiscan.fetch import download
 from pypiscan.fingerprint_report import report as fingerprint_report
 from pypiscan.git import GitError, clone_or_fetch, tags
 from pypiscan.library_map import (
     SKIP,
+    VERSION_FUNCTION,
     LibraryMapError,
     MapRow,
+    VersionFunction,
     load_library_map,
     matcher,
+    parse_version_function,
     tag_matcher,
     tag_version,
 )
@@ -232,8 +239,47 @@ def libraries_phase(episode: Path) -> Phase[Package]:
     return Phase("05-libraries", run, finish)
 
 
-# A compiled recognizer: its library, kind and whole-string matcher.
-type Recognizer = tuple[str, fingerprint.Kind, re.Pattern[str]]
+# A compiled recognizer: its library, kind, and whole-string matcher or
+# parsed version function.
+type Recognizer = tuple[str, fingerprint.Kind, re.Pattern[str] | VersionFunction]
+# What pyelftools raises on malformed input; see wheel_inspect._needed.
+ELF_ERRORS = (ELFError, AssertionError, ValueError, OverflowError)
+
+
+class MemberError(Exception):
+    """A `.libs/` file can't be read from the wheel as phase 04 saw it."""
+
+
+def read_members(wheel: Path, expected: Mapping[str, str]) -> dict[str, bytes]:
+    """Each member in ``expected``, which maps paths to their sha256 in
+    phase 04's records, read from ``wheel`` and checked against it."""
+    if not wheel.is_file():
+        raise MemberError(f"wheel {wheel} is missing")
+    found: dict[str, bytes] = {}
+    try:
+        with zipfile.ZipFile(wheel) as zf:
+            for path, sha256 in expected.items():
+                try:
+                    found[path] = zf.read(path)
+                except KeyError:
+                    raise MemberError(f"{path} is missing from {wheel.name}") from None
+                if hashlib.sha256(found[path]).hexdigest() != sha256:
+                    raise MemberError(f"{path}'s sha256 differs from phase 04's")
+    except (zipfile.BadZipFile, zlib.error, EOFError) as exc:
+        raise MemberError(f"{wheel}: not a valid zip file ({exc})") from exc
+    except OSError as exc:
+        raise MemberError(f"{wheel}: {exc}") from exc
+    return found
+
+
+def _code_matches(
+    path: str, data: bytes, library: str, function: VersionFunction
+) -> list[fingerprint.Match]:
+    try:
+        found = version_function.match(data, library, function)
+    except ELF_ERRORS as exc:
+        raise MemberError(f"{path}: pyelftools can't parse it ({exc})") from exc
+    return [] if found is None else [found]
 
 
 def fingerprint_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
@@ -241,7 +287,9 @@ def fingerprint_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
     `.libs/` file whose prefix they're listed under, over the file's strings
     in phase 04's records that pass the noise filter.
 
-    A recognizer must match a string's whole text. Records follow phase 05's
+    A recognizer must match a string's whole text. A version function
+    recognizer reads the file from the wheel at phase 02's path instead, and
+    its matches join the file's string matches. Records follow phase 05's
     file order, then the libraries' order in phase 07's lines.
     """
     by_prefix: dict[str, list[Recognizer]] = {}
@@ -250,9 +298,37 @@ def fingerprint_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
             continue
         for entry in cast(list[dict[str, str]], line["recognizers"]):
             kind = cast(fingerprint.Kind, entry["kind"])
+            pattern = entry["pattern"]
             by_prefix.setdefault(entry["prefix"], []).append(
-                (str(line["library"]), kind, matcher(entry["pattern"], kind))
+                (
+                    str(line["library"]),
+                    kind,
+                    parse_version_function(pattern)
+                    if kind == VERSION_FUNCTION
+                    else matcher(pattern, kind),
+                )
             )
+
+    def file_matches(
+        prefix: str, binary: BinaryStrings, data: bytes | None
+    ) -> dict[str, list[fingerprint.Match]]:
+        strings = [s for s in binary["strings"] if usable(s)]
+        matches: dict[str, list[fingerprint.Match]] = {}
+        for library, kind, recognizer in by_prefix.get(prefix, []):
+            found = matches.setdefault(library, [])
+            if isinstance(recognizer, VersionFunction):
+                found += _code_matches(
+                    binary["path"], cast(bytes, data), library, recognizer
+                )
+                continue
+            found += [
+                fingerprint.Match(
+                    library, kind, s["text"], s["offset"], m[1], s["section"]
+                )
+                for s in strings
+                if (m := recognizer.fullmatch(s["text"]))
+            ]
+        return matches
 
     def run(package: Package, earlier: Mapping[str, Line]) -> Result:
         strings_line = earlier["04-strings"]
@@ -260,26 +336,36 @@ def fingerprint_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
         binaries = {
             b["path"]: b for b in cast(list[BinaryStrings], strings_line["records"])
         }
+        files = cast(list[dict[str, str]], earlier["05-libraries"]["libraries"])
+        # Only files with a version function recognizer are read again.
+        expected = {
+            f["path"]: binaries[f["path"]]["sha256"]
+            for f in files
+            if any(
+                kind == VERSION_FUNCTION
+                for _, kind, _ in by_prefix.get(f["prefix"], [])
+            )
+        }
         records: list[object] = []
-        for found in cast(list[dict[str, str]], earlier["05-libraries"]["libraries"]):
-            binary = binaries[found["path"]]
-            strings = [s for s in binary["strings"] if usable(s)]
-            matches: dict[str, list[fingerprint.Match]] = {}
-            for library, kind, regex in by_prefix.get(found["prefix"], []):
-                matches.setdefault(library, []).extend(
-                    fingerprint.Match(
-                        library, kind, s["text"], s["offset"], m[1], s["section"]
+        try:
+            members = {}
+            if expected:
+                fetched = Path(cast(str, earlier["02-fetch"]["path"]))
+                members = read_members(fetched, expected)
+            for found in files:
+                binary = binaries[found["path"]]
+                data = members.get(found["path"])
+                for library, matches in file_matches(
+                    found["prefix"], binary, data
+                ).items():
+                    matches.sort(key=lambda m: cast(int, m.offset))
+                    record = fingerprint.record(
+                        wheel, binary["path"], binary["sha256"], library, matches
                     )
-                    for s in strings
-                    if (m := regex.fullmatch(s["text"]))
-                )
-            for library, library_matches in matches.items():
-                library_matches.sort(key=lambda m: cast(int, m.offset))
-                record = fingerprint.record(
-                    wheel, binary["path"], binary["sha256"], library, library_matches
-                )
-                if record is not None:
-                    records.append(record)
+                    if record is not None:
+                        records.append(record)
+        except MemberError as exc:
+            return Result("error", str(exc))
         return Result("ok", None, {"wheel": wheel, "records": records})
 
     return Phase("08-fingerprint", run)

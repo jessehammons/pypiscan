@@ -5,8 +5,9 @@ See README "The library map". The map is a CSV file with the columns in
 ``skip`` row has every column empty except ``prefix`` and ``library``. A
 mapped row needs a repo and tags, which ``tag_matcher`` compiles, and no
 identity in version 1. A row with a kind is a recognizer: its pattern
-compiles with ``matcher``, and a ``library_string`` or ``bare_version``
-row cites an ``identity_file``. A row with no kind marks a library that is
+compiles with ``matcher``, or ``parse_version_function`` for a
+``version_function_machine_code`` row, and every kind but ``build_path``
+cites an ``identity_file``. A row with no kind marks a library that is
 identified but has no recognizer yet. A ``bare_version`` row's prefix maps
 to no other library. ``cpe`` and ``osv`` may be empty
 until the CVE table (roadmap 6.1) requires them.
@@ -16,6 +17,7 @@ import csv
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 COLUMNS = [
     "prefix",
@@ -29,7 +31,8 @@ COLUMNS = [
     "cpe",
     "osv",
 ]
-KINDS = ("library_string", "build_path", "bare_version")
+VERSION_FUNCTION = "version_function_machine_code"
+KINDS = ("library_string", "build_path", VERSION_FUNCTION, "bare_version")
 SKIP = "skip"
 # Columns every row for one library agrees on.
 SHARED = ("repo", "tags", "cpe", "osv")
@@ -41,6 +44,8 @@ VERSION = r"\d[0-9A-Za-z.+~-]*"
 BARE_VERSION = r"\d+(?:\.\d+){2,}"
 # In tags, a version can also be spelled with "_" (REL_18_6).
 TAG_VERSION = r"\d[0-9A-Za-z._+~-]*"
+C_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+NUMBER = re.compile(r"\d+")
 
 
 class LibraryMapError(Exception):
@@ -97,6 +102,66 @@ def matcher(pattern: str, kind: str) -> re.Pattern[str]:
     return re.compile(regex, re.DOTALL)
 
 
+type Encoding = Literal["bits", "decimal", "out", "string"]
+
+
+@dataclass(frozen=True)
+class VersionFunction:
+    """A ``version_function_machine_code`` pattern: the function's name and
+    how its result gives the version (README "Version function machine
+    code"). ``widths`` are the fields below the top one, most significant
+    first, in bits or decimal digits; ``minimum`` is a decimal encoding's
+    ``from``; ``pattern`` is a string encoding's recognizer pattern."""
+
+    function: str
+    encoding: Encoding
+    widths: tuple[int, ...] = ()
+    minimum: int = 0
+    pattern: str = ""
+
+
+def _widths(text: str) -> tuple[int, ...]:
+    fields = text.split(".")
+    if len(fields) < 2 or fields[0] != "*":
+        raise ValueError("widths need a * and at least one more field")
+    if not all(NUMBER.fullmatch(f) and int(f) > 0 for f in fields[1:]):
+        raise ValueError("widths after the * are positive integers")
+    return tuple(int(f) for f in fields[1:])
+
+
+def parse_version_function(pattern: str) -> VersionFunction:
+    """Parse a ``version_function_machine_code`` pattern. Raises
+    ``ValueError`` for one that isn't ``<function> -> bits <widths>``,
+    ``-> decimal <widths> from <n>``, ``-> out`` or ``-> string <pattern>``.
+    """
+    function, arrow, rest = pattern.partition(" -> ")
+    if not arrow:
+        raise ValueError("pattern is <function> -> <encoding>")
+    if not C_IDENTIFIER.fullmatch(function):
+        raise ValueError(f"{function!r} isn't a C identifier")
+    encoding, space, rest = rest.partition(" ")
+    if encoding == "bits":
+        widths = _widths(rest)
+        if sum(widths) > 31:
+            raise ValueError("bits widths after the * total more than 31")
+        return VersionFunction(function, "bits", widths)
+    if encoding == "decimal":
+        widths, _, minimum = rest.partition(" from ")
+        if not NUMBER.fullmatch(minimum):
+            raise ValueError("a decimal pattern ends with from and an integer")
+        return VersionFunction(function, "decimal", _widths(widths), int(minimum))
+    if encoding == "out":
+        if space:
+            raise ValueError("nothing follows out")
+        return VersionFunction(function, "out")
+    if encoding == "string":
+        matcher(rest, VERSION_FUNCTION)
+        return VersionFunction(function, "string", pattern=rest)
+    raise ValueError(
+        f"unknown encoding {encoding!r}; expected bits, decimal, out or string"
+    )
+
+
 def tag_matcher(tags: str) -> re.Pattern[str]:
     """Compile a tags value for ``fullmatch``, with the version as group 1."""
     parts = _split("tags", tags, {"version"})
@@ -143,7 +208,10 @@ def _row_problem(row: dict[str, str]) -> str | None:
     if kind != "build_path" and not row["identity_file"]:
         return f"a {kind} row needs an identity_file"
     try:
-        matcher(row["pattern"], kind)
+        if kind == VERSION_FUNCTION:
+            parse_version_function(row["pattern"])
+        else:
+            matcher(row["pattern"], kind)
     except ValueError as exc:
         return str(exc)
     return None

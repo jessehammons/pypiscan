@@ -808,7 +808,7 @@ again only rows.
   the library no recognizer, or its recognizers matched nothing. A prefix
   marked `skip` is listed as skipped. Signals and gaps are visible side by
   side, and no version is shown without its basis.
-- **4.6** Version function machine code, as described in
+- **4.6** ✓ Version function machine code, as described in
   [Version function machine code](#version-function-machine-code): the
   `version_function_machine_code` kind and its pattern forms in the loader,
   the decoder for its code shapes, phase 08 reading those functions from
@@ -818,11 +818,11 @@ again only rows.
   Pillow 12.3.0, psycopg2-binary 2.9.13 and pyzmq 27.2.0 give the versions
   their build scripts pin: libwebp 1.6.0, brotli 1.2.0, libavif 1.4.2,
   dav1d 1.5.3 (pinned by libavif 1.4.2), libpq 17.11 and libzmq 4.3.5.
-  **← current**
 
 ### 5. SBOM comparison
 
 - **5.1** Read PEP 770 SBOMs (CycloneDX JSON) into components.
+  **← current**
 - **5.2** Compare SBOM claims against fingerprint results: coverage and
   agreement statistics.
 
@@ -884,15 +884,16 @@ again only rows.
   1.7.6 at its 1.7.7 and 1.8.0 tags. The hand-written zlib detector (2.1)
   becomes map rows once they pass its fixtures (2.2), including telling
   zlib from zlib-ng.
-- **Upstreams outside GitHub.** Phase 06 skips seven libraries with
+- **Upstreams outside GitHub.** Phase 06 skips eight libraries with
   reason `not_github`: libtiff (gitlab.com), bzip2 (sourceware.org), aom
   (aomedia.googlesource.com), libwebp (chromium.googlesource.com),
-  FreeType (gitlab.freedesktop.org), OpenLDAP (git.openldap.org) and
-  PostgreSQL (git.postgresql.org). Adding them means checking each
-  **tags** pattern against the real repository (FreeType's `VER-{version}`
-  has never been checked), and deciding whether a project's official
-  GitHub mirror, where it has one, can stand in for its upstream. It has
-  to land before 6.3 for those libraries to get fixed versions.
+  FreeType (gitlab.freedesktop.org), OpenLDAP (git.openldap.org),
+  PostgreSQL (git.postgresql.org) and dav1d (code.videolan.org). Adding
+  them means checking each **tags** pattern against the real repository
+  (FreeType's `VER-{version}` has never been checked), and deciding
+  whether a project's official GitHub mirror, where it has one, can stand
+  in for its upstream. It has to land before 6.3 for those libraries to
+  get fixed versions.
 - **Time-to-patch.** How long wheels kept shipping an affected version.
   Needs every release of each affected package, with upload times per file
   (depth, where `scan` is breadth). The clock starts when a fixed library

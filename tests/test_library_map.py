@@ -6,8 +6,10 @@ from pypiscan.library_map import (
     COLUMNS,
     LibraryMapError,
     MapRow,
+    VersionFunction,
     load_library_map,
     matcher,
+    parse_version_function,
     tag_matcher,
     tag_version,
 )
@@ -347,4 +349,106 @@ def test_bare_version_under_a_single_library_prefix(tmp_path: Path) -> None:
         ("libfoo", "foo", "bare_version"),
         ("libfoo", "foo", "library_string"),
         ("libbar", "bar", "library_string"),
+    ]
+
+
+# version_function_machine_code rows (roadmap 4.6).
+
+FUNCTION = "libwebp,libwebp,r,v{version},version_function_machine_code,{},f.c,,,"
+
+
+@pytest.mark.parametrize(
+    ("pattern", "parsed"),
+    [
+        (
+            "WebPGetDecoderVersion -> bits *.8.8",
+            VersionFunction("WebPGetDecoderVersion", "bits", (8, 8)),
+        ),
+        ("f -> bits *.12.12", VersionFunction("f", "bits", (12, 12))),
+        ("f -> bits *.31", VersionFunction("f", "bits", (31,))),
+        (
+            "PQlibVersion -> decimal *.4 from 100000",
+            VersionFunction("PQlibVersion", "decimal", (4,), 100000),
+        ),
+        ("f -> decimal *.2.2 from 0", VersionFunction("f", "decimal", (2, 2), 0)),
+        ("zmq_version -> out", VersionFunction("zmq_version", "out")),
+        (
+            "dav1d_version -> string {version}-0-g{any}",
+            VersionFunction("dav1d_version", "string", pattern="{version}-0-g{any}"),
+        ),
+        (
+            "_f2 -> string v {version}",
+            VersionFunction("_f2", "string", pattern="v {version}"),
+        ),
+    ],
+)
+def test_parse_version_function(pattern: str, parsed: VersionFunction) -> None:
+    assert parse_version_function(pattern) == parsed
+
+
+@pytest.mark.parametrize(
+    ("pattern", "message"),
+    [
+        ("f", "pattern is <function> -> <encoding>"),
+        ("f->out", "pattern is <function> -> <encoding>"),
+        ("2f -> out", "'2f' isn't a C identifier"),
+        ("f.g -> out", "'f.g' isn't a C identifier"),
+        (" -> out", "'' isn't a C identifier"),
+        ("f -> bits", "widths need a \\* and at least one more field"),
+        ("f -> bits *", "widths need a \\* and at least one more field"),
+        ("f -> bits 1.8.8", "widths need a \\*"),
+        ("f -> bits *.8.*", "widths after the \\* are positive integers"),
+        ("f -> bits *.0.8", "widths after the \\* are positive integers"),
+        ("f -> bits *.-8", "widths after the \\* are positive integers"),
+        ("f -> bits *.8.x", "widths after the \\* are positive integers"),
+        ("f -> bits *.16.16", "bits widths after the \\* total more than 31"),
+        ("f -> bits *.32", "bits widths after the \\* total more than 31"),
+        ("f -> decimal *.4", "a decimal pattern ends with from and an integer"),
+        ("f -> decimal *.4 from", "a decimal pattern ends with from and an integer"),
+        ("f -> decimal *.4 from -1", "a decimal pattern ends with from and an"),
+        ("f -> decimal *.4 from x", "a decimal pattern ends with from and an"),
+        ("f -> decimal * from 0", "widths need a \\*"),
+        ("f -> out x", "nothing follows out"),
+        ("f -> out ", "nothing follows out"),
+        ("f -> string", "pattern needs exactly one \\{version\\}"),
+        ("f -> string {any}", "pattern needs exactly one \\{version\\}"),
+        ("f -> string {version}{version}", "pattern needs exactly one"),
+        (
+            "f -> string {version} {date}",
+            "pattern has an unknown placeholder \\{date\\}",
+        ),
+        ("f -> hex *.8", "unknown encoding 'hex'"),
+    ],
+)
+def test_rejects_version_function_patterns(
+    tmp_path: Path, pattern: str, message: str
+) -> None:
+    path = write_map(tmp_path / "m.csv", BARE, FUNCTION.replace("{}", pattern))
+    with pytest.raises(LibraryMapError, match=f"{path}:3: {message}"):
+        load_library_map(path)
+
+
+def test_version_function_row_needs_an_identity_file(tmp_path: Path) -> None:
+    row = FUNCTION.replace("{}", "f -> out").replace(",f.c,", ",,")
+    path = write_map(tmp_path / "m.csv", row)
+    message = f"{path}:2: a version_function_machine_code row needs an identity_file"
+    with pytest.raises(LibraryMapError, match=message):
+        load_library_map(path)
+
+
+def test_version_function_shares_a_prefix(tmp_path: Path) -> None:
+    rows = [
+        "libavif,libavif,r,v{version},version_function_machine_code,"
+        "avifVersion -> string {version},src/avif.c,,,",
+        "libavif,aom,a,v{version},library_string,AOMedia {version},av1.c,,,",
+        "libavif,dav1d,d,{version},version_function_machine_code,"
+        "dav1d_version -> string {version}-0-g{any},src/lib.c,,,",
+        "libavif,yuv,y,{version},,,,,,",
+    ]
+    loaded = load_library_map(write_map(tmp_path / "m.csv", *rows))
+    assert [(r.library, r.kind) for r in loaded] == [
+        ("libavif", "version_function_machine_code"),
+        ("aom", "library_string"),
+        ("dav1d", "version_function_machine_code"),
+        ("yuv", ""),
     ]

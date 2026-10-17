@@ -1,9 +1,10 @@
 """Check every recognizer in the committed library map against real strings.
 
 ``recognizer_examples.tsv`` holds strings from the full run's episode
-(roadmap 3.8): for each recognizer row, strings it must match and the
-version it must give, and strings no recognizer under their prefix may
-match, with an empty library, kind and version.
+(roadmap 3.8): for each recognizer row of a string kind, strings it must
+match and the version it must give, and strings no recognizer under their
+prefix may match, with an empty library, kind and version. Version function
+rows read code, not strings; ``version_function_examples.tsv`` covers them.
 """
 
 import csv
@@ -11,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from pypiscan.library_map import MapRow, load_library_map, matcher
+from pypiscan.library_map import VERSION_FUNCTION, MapRow, load_library_map, matcher
 from pypiscan.library_report import prefix
 from pypiscan.noise import usable
 from pypiscan.wheel_strings import VERSION_TOKEN, StringRecord, template
@@ -28,7 +29,11 @@ def load_examples() -> list[dict[str, str]]:
         return list(reader)
 
 
-RECOGNIZERS = [r for r in load_library_map(ROOT / "data/libraries.csv") if r.kind]
+RECOGNIZERS = [
+    r
+    for r in load_library_map(ROOT / "data/libraries.csv")
+    if r.kind and r.kind != VERSION_FUNCTION
+]
 EXAMPLES = load_examples()
 MATCHES = [e for e in EXAMPLES if e["version"]]
 NON_MATCHES = [e for e in EXAMPLES if not e["version"]]
