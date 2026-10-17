@@ -52,6 +52,7 @@ from pypiscan.pypi import (
     release_files,
     select_target,
 )
+from pypiscan.sbom_report import report as sbom_report
 from pypiscan.wheel_inspect import (
     ZIP_ERRORS,
     SkippedMember,
@@ -790,6 +791,26 @@ def write_fingerprint_report(
     (episode / "fingerprint-report.md").write_text(text, encoding="utf-8")
 
 
+def write_sbom_report(
+    episode: Path,
+    packages: Sequence[Package],
+    part_1: Sequence[str],
+    rows: Sequence[MapRow],
+    ambiguous: Ambiguous,
+) -> None:
+    """Rewrite sbom-report.md from part 1's phases (01 to 05), 08 and 09;
+    ``part_1`` names part 1's phases."""
+    text = sbom_report(
+        packages,
+        {name: _read_lines(episode / f"{name}.jsonl") for name in part_1},
+        _read_lines(episode / "08-fingerprint.jsonl"),
+        _read_lines(episode / "09-sboms.jsonl"),
+        rows,
+        ambiguous,
+    )
+    (episode / "sbom-report.md").write_text(text, encoding="utf-8")
+
+
 def scan(
     package_list: Path,
     library_map: Path,
@@ -851,6 +872,8 @@ def scan(
             write_fingerprint_report(
                 episode, packages, names, recognizers, rows, ambiguous
             )
+        if (episode / "09-sboms.jsonl").is_file():
+            write_sbom_report(episode, packages, names, rows, ambiguous)
         return status
     finally:
         signal.signal(signal.SIGINT, handler)
