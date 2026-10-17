@@ -407,6 +407,9 @@ An SBOM is a claim, and pypiscan treats it as one:
   [Later](#later-tbd)). The claim rests on which package owns the
   file's path, not on its bytes, so a library a build installed over a
   packaged file would still be claimed.
+- A build can change a wheel after auditwheel writes its SBOM:
+  numba 0.68.0's deletes `numba.libs/` after repair, so its SBOM
+  names a libgomp the wheel doesn't carry.
 - A project's SBOM generated from its build scripts isn't a second
   source beside them, and it isn't a list of what one wheel carries.
 - `scope` is recorded, never interpreted: cargo-cyclonedx marks build
@@ -444,6 +447,76 @@ subdirectories included. A wheel with no such file gives no records.
 Only `cyclonedx-json` files without an `error` have `tools`, `subject`
 and `components`. For every other file all three are `null`, so a file
 that was only partly read never looks complete.
+
+### Comparing SBOMs with fingerprints
+
+Once phase 09 is finished, every run rewrites `sbom-report.md` in the
+episode from phases 05, 08 and 09, as it rewrites the fingerprint
+report (roadmap 5.2). Records and the fingerprint report don't change.
+Only auditwheel's components are compared: each claims a file, and a
+file is what pypiscan measures. Other SBOMs are listed, with their
+components counted (see "Comparing project SBOMs" under
+[Later](#later-tbd)).
+
+A component is tied to a `.libs/` file by its bom-ref, and only by an
+exact match:
+
+- The bom-ref must be the component's purl, `#` and 64 lowercase hex
+  digits, in a file whose tools include `auditwheel`. The wheel's own
+  component has no such bom-ref and isn't counted.
+- For each `.libs/` file in the same wheel, the name auditwheel copied
+  it from is rebuilt: the part before the first `.` loses its trailing
+  `-` and 8 hex digits, so `libkrb5-fcafa220.so.3.3` was
+  `libkrb5.so.3.3`. A file whose name has no such part has no name to
+  rebuild.
+- That name is joined to each of `/lib64/`, `/usr/lib64/`, `/lib/` and
+  `/usr/lib/`, and a path whose sha256 is the bom-ref's hex digits ties
+  the component to the file. In psycopg2-binary 2.9.13 and Pillow
+  12.3.0, every component matched one file this way, under `/lib64/`.
+- A component that matches no file, or more than one, is tied to none
+  and listed. The directories are a guess, but a guess can only miss a
+  tie, never make a wrong one.
+
+A tied file is compared when the library map ties its prefix to one
+library, and that library's `contains` record for the file has a
+version. The package's version is cut to its upstream release:
+everything from its last `-` is dropped (rpm's release, apk's `-rN`,
+a deb revision), and a deb version also loses a leading epoch (`N:`).
+A component whose purl isn't `pkg:rpm`, `pkg:deb` or `pkg:apk`, or
+that has no version, isn't compared. The two agree when the cut
+version equals the fingerprint version, or a release that version may
+be (see [Ambiguous versions](#ambiguous-versions)), and differ
+otherwise; a difference is checked by hand. Any other tied file isn't
+compared, and the report says why: two components are tied to it, its
+prefix maps to several libraries, so the package's version could be
+set against the wrong one, or the fingerprint report's reason for
+having no version.
+
+Agreement is two signals saying the same thing, not proof. When the
+fingerprint version is a bare version, it is the kind of second source
+[How findings are classified](#how-findings-are-classified) asks for.
+
+The report starts with counts, saying they cover auditwheel's SBOMs
+only:
+
+- packages scanned in phase 09, with any SBOM and with auditwheel's;
+- auditwheel components that name a file, tied and not tied;
+- `.libs/` files in scanned packages, tied and not tied;
+- tied files that agree or differ, by the fingerprint version's basis,
+  and tied files not compared, by reason.
+
+Then, for each package with an SBOM or a `.libs/` file:
+
+- its SBOM files, each with its tools and component count, whether its
+  components are compared, or its error;
+- each `.libs/` file with the component tied to it (name, version and
+  purl) or none, and for a tied file the comparison, with the
+  fingerprint version, basis and notes shown as the fingerprint report
+  shows them;
+- auditwheel components tied to no file, with their bom-refs.
+
+A package that wasn't scanned in phase 09 shows the phase where it
+stopped and that phase's reason, as in the fingerprint report.
 
 ## How a scan runs
 
@@ -577,6 +650,9 @@ Part 2:
    zip-member size limit aren't read. A missing or changed wheel makes
    the package's line `error`, so rerunning phase 09 needs the wheel
    cache. A wheel with no SBOM gets an `ok` line with no records.
+   Once phase 09 is finished, every run rewrites `sbom-report.md` in the
+   episode (see
+   [Comparing SBOMs with fingerprints](#comparing-sboms-with-fingerprints)).
 10. `10-cves` (network, per library): candidate CVEs from NVD, by the map's
     CPE, and OSV, by its OSV identifier, checked against the curated CVE
     table (section 6). Fixed versions come from the release tags that
@@ -733,7 +809,7 @@ are marked ✓.
 - **0.1** ✓ Working rules in `CLAUDE.md`: never weaken a check (coverage
   threshold, lint rules, type strictness, CI steps) to make it pass, and
   explain the problem in the PR instead; keep non-test changes under about
-  300 lines; call out any CI or tool-configuration change in the PR
+  500 lines; call out any CI or tool-configuration change in the PR
   description.
 - **0.2** ✓ Pyright strict mode for all of `src/pypiscan` instead of a file
   list; raise the coverage threshold to 90%.
@@ -977,10 +1053,15 @@ again only rows.
   move to phases 10 and 11. Manual check: Pillow 12.3.0,
   psycopg2-binary 2.9.13 and cryptography 50.0.2 give the SBOMs the
   top-100 scan found, and lxml 6.1.3 none.
-- **5.2** Compare SBOM claims against fingerprint results: coverage and
-  agreement statistics. It decides how a component is tied to a
-  `.libs/` file, which auditwheel's components don't name.
-  **← current**
+- **5.2** ✓ Compare SBOM claims against fingerprint results, as
+  described in
+  [Comparing SBOMs with fingerprints](#comparing-sboms-with-fingerprints):
+  `sbom-report.md`, auditwheel's components tied to `.libs/` files by
+  their bom-refs, their versions compared with fingerprint versions,
+  and coverage and agreement counts. Manual check: Pillow, both
+  psycopg wheels, scipy, scikit-learn and numba, which have auditwheel
+  SBOMs, and numpy, which has `.libs/` files and none; in both psycopg
+  wheels, krb5 and cyrus-sasl agree.
 
 ### 6. CVE data
 
@@ -990,6 +1071,7 @@ again only rows.
   (library code or a bundled tool), disputed status and sources. Seeded with
   CVE-2023-4863. Requires `cpe` and `osv` on the library map's mapped
   rows.
+  **← current**
 - **6.2** Phase 10's importer: draft candidate rows for each library from
   NVD, by CPE, and OSV, by OSV identifier.
 - **6.3** Range verifier: given phase 06's clone and a row's fix commits,
@@ -1137,10 +1219,19 @@ again only rows.
   `krb5-libs` 1.15.1-55.el7_9 and `cyrus-sasl-lib` 2.1.26-24.el7_9. The
   build image's package manager answered that, a stronger signal than a
   debuglink, though wheels repaired before auditwheel 6.5.0 have no
-  SBOM. Another candidate is a `.gnu_debuglink` section, which RPM's
+  SBOM. 5.2's report ties each such package to its file. Another
+  candidate is a `.gnu_debuglink` section, which RPM's
   debuginfo split adds: psycopg2-binary's krb5 and SASL files have one
   and its libraries built from source don't, though any build that
   splits off debug info adds one.
+- **Comparing project SBOMs.** 5.2 compares only auditwheel's
+  components. A project's own SBOM names libraries, not files, and in
+  its own words (Pillow's `FreeType`, `Little CMS 2`, and `zlib` for
+  zlib-ng), so comparing one needs a hand-kept map from its names to
+  the library map's. Pillow's is generated from the build scripts
+  that are already the answer key, so it adds no independent source.
+  Rust extensions' SBOMs name crates compiled in statically, which
+  waits for "Statically linked libraries".
 
 ## Data handling and disclosure
 

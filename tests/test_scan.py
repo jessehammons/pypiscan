@@ -1479,3 +1479,94 @@ def test_editing_the_ambiguous_list_rewrites_the_report(
     assert "08-fingerprint: already finished, skipped" in err
     assert "pypiscan scan: error" not in err
     assert f"{row} ambiguous: may also be 1.6.59 |" in report.read_text()
+
+
+# The SBOM report (roadmap 5.2).
+
+PNG_PURL = "pkg:rpm/almalinux/libpng@1.6.58-1.el8"
+PNG_REF = hashlib.sha256(b"/lib64/libpng16.so.16.58.0").hexdigest()
+AUDITWHEEL_SBOM = json.dumps(
+    {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.4",
+        "metadata": {"tools": [{"name": "auditwheel", "version": "6.8.2"}]},
+        "components": [
+            {
+                "type": "library",
+                "bom-ref": f"{PNG_PURL}#{PNG_REF}",
+                "name": "libpng",
+                "version": "1.6.58-1.el8",
+                "purl": PNG_PURL,
+            }
+        ],
+    }
+).encode()
+
+
+def with_auditwheel_sbom(client: object, cache_dir: Path, episode: Path) -> list[Phase]:
+    """The stub phases, with an auditwheel SBOM in demo's wheel."""
+    stubs = stub_phases(client, cache_dir, episode)
+
+    def resolve(package: Package, earlier: Mapping[str, Line]) -> Result:
+        result = stubs[0].run(package, earlier)
+        if package.name != "demo":
+            return result
+        sboms = {"demo-1.0.dist-info/sboms/auditwheel.cdx.json": AUDITWHEEL_SBOM}
+        wheel = build_wheel(cache_dir / "demo.whl", sboms)
+        return Result(
+            "ok", None, {"sha256": hashlib.sha256(wheel.read_bytes()).hexdigest()}
+        )
+
+    return [Phase("01-resolve", resolve), *stubs[1:]]
+
+
+def test_sbom_report_is_rewritten_once_phase_09_is_finished(
+    dirs: Dirs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scan_module, "phases", with_auditwheel_sbom)
+    monkeypatch.setattr(scan_module, "UPSTREAM_HOST", None)
+    repo = make_repo(dirs.episode.parent / "libpng", {"v1.6.58": {}})
+    png = f"libpng16,libpng,{repo},v{{version}},library_string,"
+    png += "libpng version {version},p.c,,,"
+    dirs.map.write_text(f"{','.join(COLUMNS)}\n{png}\nlibgfortran,skip,,,,,,,,\n")
+    sboms_phase = scan_module.sboms_phase
+
+    def interrupt(package: Package, earlier: Mapping[str, Line]) -> Result:
+        handler = signal.getsignal(signal.SIGINT)
+        assert callable(handler)
+        handler(signal.SIGINT, None)
+        return Result("ok", None, {"records": []})
+
+    # Stopped in phase 09: the fingerprint report is written, the SBOM
+    # report isn't.
+    monkeypatch.setattr(
+        scan_module, "sboms_phase", lambda: Phase("09-sboms", interrupt)
+    )
+    assert run(dirs, "--count", "3") == EXIT_INTERRUPTED
+    fingerprints = (dirs.episode / "fingerprint-report.md").read_bytes()
+    report = dirs.episode / "sbom-report.md"
+    assert not report.exists()
+
+    # Once phase 09 finishes, the SBOM report is written, and the
+    # fingerprint report doesn't change.
+    (dirs.episode / "09-sboms.jsonl.partial").unlink()
+    monkeypatch.setattr(scan_module, "sboms_phase", sboms_phase)
+    assert run(dirs, "--count", "3") == 0
+    assert (dirs.episode / "fingerprint-report.md").read_bytes() == fingerprints
+    text = report.read_text()
+    assert "- Tied files that agree: 1 (library_string 1).\n" in text
+    assert (
+        f"| libpng16-1a2b3c4d.so.16.58.0 | libpng 1.6.58-1.el8 ({PNG_PURL}) | libpng "
+        "| 1.6.58 | library_string |  | agrees |\n"
+    ) in text
+    assert "## puredemo 3.1\n\n`puredemo.whl`\n\nNo SBOM files.\n" in text
+    assert "## missing 9.9\n\nerror at 01-resolve: HTTP 404\n" in text
+
+    # A run where every phase was already finished rewrites it.
+    report.write_text("stale")
+    assert run(dirs, "--count", "3") == 0
+    assert report.read_text() == text
+    report.unlink()
+    assert run(dirs, "--count", "3") == 0
+    assert report.read_text() == text
+    assert (dirs.episode / "fingerprint-report.md").read_bytes() == fingerprints

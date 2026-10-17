@@ -26,12 +26,12 @@ FINGERPRINT = "08-fingerprint"
 HEADER = "| file | library | version | basis | note |\n|---|---|---|---|---|"
 
 
-def _cell(text: str) -> str:
+def cell(text: str) -> str:
     return text.replace("|", "\\|")
 
 
-def _row(*cells: str) -> str:
-    return "| " + " | ".join(_cell(c) for c in cells) + " |"
+def row(*cells: str) -> str:
+    return "| " + " | ".join(cell(c) for c in cells) + " |"
 
 
 def _recorded(record: Line, ambiguous: Ambiguous) -> tuple[str, str, str]:
@@ -52,6 +52,25 @@ def _recorded(record: Line, ambiguous: Ambiguous) -> tuple[str, str, str]:
     return str(version), basis, "; ".join(notes)
 
 
+def missing(library: str, record: Line | None, recognized: bool) -> str:
+    """Why a library has no version: ``recognized`` says whether the map
+    gives it recognizers under the file's prefix."""
+    if library == SKIP:
+        return "not tracked"
+    if record is None:
+        return "not detected" if recognized else "no recognizer"
+    return "matches disagree"
+
+
+def cells(
+    library: str, record: Line | None, recognized: bool, ambiguous: Ambiguous
+) -> tuple[str, str, str]:
+    """Version, basis and note for a library under a file's prefix."""
+    if library == SKIP or record is None:
+        return NONE, NONE, missing(library, record, recognized)
+    return _recorded(record, ambiguous)
+
+
 def _has_recognizers(line: Line | None, prefix: str) -> bool:
     """Whether phase 07 listed recognizers for this library under ``prefix``."""
     if line is None or line["status"] != "ok":
@@ -60,19 +79,32 @@ def _has_recognizers(line: Line | None, prefix: str) -> bool:
     return any(entry["prefix"] == prefix for entry in entries)
 
 
-def _stopped(package: str, line: Line, part_1: Mapping[str, Mapping[str, Line]]) -> str:
-    """``<status> at <phase>: <reason>`` for a package phase 08 didn't scan.
+def stopped(
+    package: str, line: Line, earlier: Mapping[str, Mapping[str, Line]], own: str
+) -> str:
+    """``<status> at <phase>: <reason>`` for a package phase ``own`` didn't
+    scan, given the earlier phases' lines keyed by phase and package.
 
     A skipped line's reason names the phase where the package's line first
-    wasn't ok; that phase's line gives the reason. Any other reason is phase
-    08's own.
+    wasn't ok; that phase's line gives the reason. Any other reason is
+    ``own``'s.
     """
     phase = str(line["reason"])
-    if phase in part_1:
-        line = part_1[phase][package]
+    if phase in earlier:
+        line = earlier[phase][package]
     else:
-        phase = FINGERPRINT
-    return f"{line['status']} at {phase}: {_cell(str(line['reason']))}"
+        phase = own
+    return f"{line['status']} at {phase}: {cell(str(line['reason']))}"
+
+
+def libraries_by_prefix(rows: Sequence[MapRow]) -> dict[str, list[str]]:
+    """The libraries the map gives each prefix, in map order."""
+    by_prefix: dict[str, list[str]] = {}
+    for each in rows:
+        names = by_prefix.setdefault(each.prefix, [])
+        if each.library not in names:
+            names.append(each.library)
+    return by_prefix
 
 
 def _section(
@@ -85,7 +117,7 @@ def _section(
 ) -> list[str]:
     out = [f"## {package.name} {package.version}", ""]
     if fingerprints["status"] != "ok":
-        out.append(_stopped(package.name, fingerprints, part_1))
+        out.append(stopped(package.name, fingerprints, part_1, FINGERPRINT))
         return out
     out += [f"`{fingerprints['wheel']}`", ""]
     libraries = part_1.get("05-libraries", {}).get(package.name) or {}
@@ -102,15 +134,10 @@ def _section(
         name = PurePosixPath(found["path"]).name
         for library in by_prefix.get(found["prefix"], []):
             record = records.get((found["path"], library))
-            if library == SKIP:
-                cells = (NONE, NONE, "not tracked")
-            elif record is not None:
-                cells = _recorded(record, ambiguous)
-            elif _has_recognizers(recognizers.get(library), found["prefix"]):
-                cells = (NONE, NONE, "not detected")
-            else:
-                cells = (NONE, NONE, "no recognizer")
-            out.append(_row(name, library, *cells))
+            recognized = _has_recognizers(recognizers.get(library), found["prefix"])
+            out.append(
+                row(name, library, *cells(library, record, recognized, ambiguous))
+            )
     return out
 
 
@@ -125,11 +152,7 @@ def report(
     """The report's text, from phases 01 to 05's lines keyed by phase and
     package name, phase 08's keyed by package name, phase 07's keyed by
     library, the map's rows and the list of ambiguous versions."""
-    by_prefix: dict[str, list[str]] = {}
-    for row in rows:
-        names = by_prefix.setdefault(row.prefix, [])
-        if row.library not in names:
-            names.append(row.library)
+    by_prefix = libraries_by_prefix(rows)
     out = [INTRO]
     for package in packages:
         out += _section(

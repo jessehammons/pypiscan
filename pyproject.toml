@@ -56,7 +56,7 @@ addopts = [
     "--strict-config",
     "--cov=pypiscan",
     "--cov-branch",
-    "--cov-report=term-missing",
+    "--cov-report=term-missing:skip-covered",
     "--disable-socket",
 ]
 
