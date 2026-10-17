@@ -809,7 +809,7 @@ are marked ✓.
 - **0.1** ✓ Working rules in `CLAUDE.md`: never weaken a check (coverage
   threshold, lint rules, type strictness, CI steps) to make it pass, and
   explain the problem in the PR instead; keep non-test changes under about
-  300 lines; call out any CI or tool-configuration change in the PR
+  500 lines; call out any CI or tool-configuration change in the PR
   description.
 - **0.2** ✓ Pyright strict mode for all of `src/pypiscan` instead of a file
   list; raise the coverage threshold to 90%.
