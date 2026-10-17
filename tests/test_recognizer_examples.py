@@ -3,7 +3,10 @@
 ``recognizer_examples.tsv`` holds strings from the full run's episode
 (roadmap 3.8): for each recognizer row of a string kind, strings it must
 match and the version it must give, and strings no recognizer under their
-prefix may match, with an empty library, kind and version. Version function
+prefix may match, with an empty library, kind and version. A non-match can
+come from outside ``.libs/``, such as numpy's ``9, -0.52``, which bzip2's
+pattern once matched; its prefix names the recognizers it is checked
+against. Version function
 rows read code, not strings; ``version_function_examples.tsv`` covers them.
 """
 
@@ -83,8 +86,12 @@ def test_non_match_matches_no_recognizer(example: dict[str, str]) -> None:
 @pytest.mark.parametrize("example", EXAMPLES, ids=example_id)
 def test_example_comes_from_its_prefix(example: dict[str, str]) -> None:
     assert example["wheel"].endswith(".whl")
-    assert ".libs/" in example["member"]
-    assert prefix(example["member"]) == example["prefix"]
+    if ".libs/" in example["member"]:
+        assert prefix(example["member"]) == example["prefix"]
+    else:
+        # A string seen outside .libs/ can only be a non-match, checked
+        # against the recognizers of the prefix it names.
+        assert not example["version"]
 
 
 @pytest.mark.parametrize("example", MATCHES, ids=example_id)

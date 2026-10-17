@@ -498,7 +498,7 @@ the package list. One row per prefix, library and way of identifying it:
 | prefix | library | repo | tags | kind | pattern | identity_file | identity | cpe | osv |
 |---|---|---|---|---|---|---|---|---|---|
 | `libtiff` | `libtiff` | `https://gitlab.com/libtiff/libtiff` | `v{version}` | `library_string` | `LIBTIFF, Version {version}` | `libtiff/tiffvers.h.in` | | `libtiff:libtiff` | … |
-| `libfreetype` | `bzip2` | `https://sourceware.org/git/bzip2.git` | `bzip2-{version}` | `library_string` | `{version}, {any}` | `bzlib_private.h` | | `bzip:bzip2` | … |
+| `libfreetype` | `bzip2` | `https://sourceware.org/git/bzip2.git` | `bzip2-{version}` | `library_string` | `{version}, {any}-{any}-20{any}` | `bzlib_private.h` | | `bzip:bzip2` | … |
 | `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | `build_path` | `{any}/openjpeg-{version}/{any}` | | | `uclouvain:openjpeg` | … |
 | `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | `bare_version` | `{version}` | `src/lib/openjp2/opj_config_private.h.cmake.in` | | `uclouvain:openjpeg` | … |
 | `libwebp` | `libwebp` | `https://chromium.googlesource.com/webm/libwebp` | `v{version}` | `version_function_machine_code` | `WebPGetDecoderVersion -> bits *.8.8` | `src/dec/vp8_dec.c` | | `webmproject:libwebp` | … |
@@ -969,15 +969,18 @@ again only rows.
   zlib-ng with zlib's banners, is a separate case, under "Checking
   patterns at every release tag".
 - **Patterns that don't name their library.** Most library-string
-  patterns name the library, but two don't: bzip2's `{version}, {any}` and
-  geos's `{version}-CAPI-{any}`. Both strings are the libraries' own; the
-  weakness is the pattern, whose literal text is only `, ` or `-CAPI-`.
-  Any string that starts with a version and a comma matches bzip2's. In a
-  libfreetype file that also holds bzip2's real string, such a string
-  gives `version: null` and `conflict: true`; in one built without bzip2,
-  it gives a bzip2 version that is wrong and unflagged. Pillow 12.3.0's
-  libfreetype has no such string. Options: a narrower placeholder, such as
-  one for the date in bzip2's `1.0.8, 13-Jul-2019`; a loader rule that a
+  patterns name the library, but two don't: bzip2's and geos's
+  `{version}-CAPI-{any}`. Both strings are the libraries' own; the
+  weakness is the pattern. bzip2's was `{version}, {any}`, which any
+  string starting with a version and a comma matches: run over every
+  binary outside `.libs/` in a `--count 20` episode, it matched seven
+  strings in numpy 2.5.4's `mtrand` and `_generator`, such as
+  `9, -0.52`. It is now narrowed to `{version}, {any}-{any}-20{any}`,
+  which `BZ_VERSION`'s dated form (`1.0.8, 13-Jul-2019`) fits at every
+  release from 1.0.1 on; earlier releases have no date and give
+  nothing. geos's literal text is still only `-CAPI-`, so in a
+  `libgeos_c` file a string with that text and a leading version would
+  give a wrong, unflagged geos version. Options: a loader rule that a
   library-string pattern's literal text contains the library's name,
   ignoring case, which every other current pattern meets; or counting
   such patterns only as hints, like bare versions.
