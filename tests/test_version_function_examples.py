@@ -19,7 +19,7 @@ from pypiscan.library_map import (
     parse_version_function,
 )
 from pypiscan.library_report import prefix
-from pypiscan.version_function import shape, version
+from pypiscan.version_function import Returned, shape, version
 
 ROOT = Path(__file__).parent.parent
 FIELDS = [
@@ -109,3 +109,20 @@ def test_example_comes_from_its_prefix(example: dict[str, str]) -> None:
     assert example["wheel"].endswith(".whl")
     assert ".libs/" in example["member"]
     assert prefix(example["member"]) == example["prefix"]
+
+
+def test_libwebp_demux_and_mux_rows_start_at_1_0_0() -> None:
+    """Before libwebp 1.0.0, WebPGetDemuxVersion and WebPGetMuxVersion
+    returned the demux and mux libraries' own versions (0.3.3 and 0.4.1 in
+    libwebp 0.6.1), so their rows hold only from 0x10000."""
+    rows = [r for r in ROWS if r.prefix in ("libwebpdemux", "libwebpmux")]
+    assert len(rows) == 2
+    for row in rows:
+        function = parse_version_function(row.pattern)
+        assert function.minimum == 0x10000
+        for old in (0x000303, 0x000401, 0x00FFFF):
+            assert version(Returned("integer", (old,)), function) is None
+        assert version(Returned("integer", (0x10600,)), function) == (
+            "0x10600",
+            "1.6.0",
+        )

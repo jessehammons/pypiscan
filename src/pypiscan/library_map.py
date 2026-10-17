@@ -110,8 +110,9 @@ class VersionFunction:
     """A ``version_function_machine_code`` pattern: the function's name and
     how its result gives the version (README "Version function machine
     code"). ``widths`` are the fields below the top one, most significant
-    first, in bits or decimal digits; ``minimum`` is a decimal encoding's
-    ``from``; ``pattern`` is a string encoding's recognizer pattern."""
+    first, in bits or decimal digits; ``minimum`` is the encoding's
+    ``from``, 0 when a bits pattern has none; ``pattern`` is a string
+    encoding's recognizer pattern."""
 
     function: str
     encoding: Encoding
@@ -132,7 +133,8 @@ def _widths(text: str) -> tuple[int, ...]:
 def parse_version_function(pattern: str) -> VersionFunction:
     """Parse a ``version_function_machine_code`` pattern. Raises
     ``ValueError`` for one that isn't ``<function> -> bits <widths>``,
-    ``-> decimal <widths> from <n>``, ``-> out`` or ``-> string <pattern>``.
+    optionally with ``from <n>``, ``-> decimal <widths> from <n>``,
+    ``-> out`` or ``-> string <pattern>``.
     """
     function, arrow, rest = pattern.partition(" -> ")
     if not arrow:
@@ -141,10 +143,13 @@ def parse_version_function(pattern: str) -> VersionFunction:
         raise ValueError(f"{function!r} isn't a C identifier")
     encoding, space, rest = rest.partition(" ")
     if encoding == "bits":
-        widths = _widths(rest)
+        text, sep, minimum = rest.partition(" from")
+        if sep and not (minimum[:1] == " " and NUMBER.fullmatch(minimum[1:])):
+            raise ValueError("from in a bits pattern takes an integer")
+        widths = _widths(text)
         if sum(widths) > 31:
             raise ValueError("bits widths after the * total more than 31")
-        return VersionFunction(function, "bits", widths)
+        return VersionFunction(function, "bits", widths, int(minimum or 0))
     if encoding == "decimal":
         widths, _, minimum = rest.partition(" from ")
         if not NUMBER.fullmatch(minimum):
