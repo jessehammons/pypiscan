@@ -101,6 +101,10 @@ sent.
   `.github/dependencies.json`). They serve as an answer key for checking
   version detection, and for triage. Disagreements between the two are
   findings.
+- **SBOMs in the wheel** are claims about what it bundles, made by the
+  tools that built it (see [SBOMs in wheels](#sboms-in-wheels)). They
+  are compared with the binaries (roadmap 5.2) and never change what
+  the binaries show.
 - **The upstream library's git history** is the ground truth for a CVE's
   fixed version: the first release whose tag contains the fix commit. The CVE
   table stores the fix commits, so every range can be recomputed.
@@ -357,6 +361,90 @@ version and every release it may be, so an ambiguous version can add
 a candidate but never hide one. The report reads the list on every
 run, so editing it needs no phase file deleted.
 
+## SBOMs in wheels
+
+[PEP 770](https://peps.python.org/pep-0770/) puts a wheel's SBOMs in its
+`.dist-info/sboms/` directory. It allows any format, recommends a
+standard one in JSON, and allows several files. Every SBOM in the
+top-100 scan's wheels was CycloneDX JSON, of three kinds:
+
+- **auditwheel's**, `auditwheel.cdx.json`, which `auditwheel repair`
+  writes from version 6.5.0 on, in CycloneDX 1.4. After the wheel
+  itself, it has one component for each file auditwheel copied in that
+  a distribution package owns, as the build image's package manager
+  reports it: the package's name and version, and a purl such as
+  `pkg:rpm/centos/krb5-libs@1.15.1-55.el7_9`. A package that owns
+  several of the files appears once for each. Libraries built from
+  source get no component, and a wheel with no packaged library gets
+  no SBOM. A component names neither its library nor its file in the
+  wheel; its bom-ref ends with the sha256 of the file's path on the
+  build machine.
+- **A project's own**, such as Pillow's, generated from its
+  `.github/dependencies.json` and embedded unchanged in every wheel of a
+  release. Pillow 12.3.0's marks FreeType and other libraries its wheel
+  carries `optional`, which CycloneDX 1.7 defines as not installed;
+  lists `zlib` 2.3.3, the zlib-ng version it pins, though its binaries
+  load the system's zlib (roadmap 2.1); and leaves out libpng, xz and
+  brotli, which its wheel carries.
+- **A Rust extension's**, written by cargo-cyclonedx: the crates
+  compiled in, among them `-sys` crates for C libraries, some with the
+  library's version in their build metadata, such as
+  `zstd-sys 2.0.16+zstd.1.5.7`.
+
+An SBOM is a claim, and pypiscan treats it as one:
+
+- It never sets or changes a version in fingerprint records. 5.2
+  compares the two, and a disagreement is a finding, as one between
+  the binaries and the build scripts is.
+- A missing SBOM, or a library with no component, shows nothing.
+  Wheels repaired before auditwheel 6.5.0 have no SBOM, and a
+  project's SBOM can leave libraries out, so a missing component never
+  shows an upstream build (level 2 in
+  [How findings are classified](#how-findings-are-classified)).
+- An auditwheel component marks its file as a distribution package's
+  build, whose version is the package's and can carry backported
+  fixes (see "Libraries from the build image's packages" under
+  [Later](#later-tbd)). The claim rests on which package owns the
+  file's path, not on its bytes, so a library a build installed over a
+  packaged file would still be claimed.
+- A project's SBOM generated from its build scripts isn't a second
+  source beside them, and it isn't a list of what one wheel carries.
+- `scope` is recorded, never interpreted: cargo-cyclonedx marks build
+  and dev dependencies `excluded`, as CycloneDX defines it, but Pillow
+  marks libraries its wheel carries `optional`.
+
+`sbom` writes JSON Lines with its own `schema_version`, one record per
+file under a top-level `*.dist-info/sboms/` directory of the wheel,
+subdirectories included. A wheel with no such file gives no records.
+
+- `wheel`, `path`, `size`, `sha256`: as in `inspect`.
+- `format`: `cyclonedx-json` for JSON whose top level is an object with
+  `bomFormat` `CycloneDX`, `spdx-json` for one with `spdxVersion`, and
+  `other` for anything else. The file's name isn't used.
+- `spec_version`: CycloneDX's `specVersion` verbatim, or `null`.
+- `tools`: each tool in `metadata.tools`, as its `name` and `version`,
+  from either form CycloneDX allows: a list of tools (1.4's form, still
+  allowed later, which auditwheel and cargo-cyclonedx write) or an
+  object holding `components` and `services` (1.5 on, which Pillow
+  writes). Empty when there are none.
+- `components`: every component, nested ones included, in document
+  order: each one, then those nested in it. Each has `bom-ref`, `type`,
+  `name`, `version`, `purl` and `scope` verbatim, `null` when absent,
+  and `parent`, the index in this list of the component it is nested
+  in, or `null`. A purl is never derived from a bom-ref: Pillow's
+  libraries have bom-refs such as `pkg:generic/freetype2` and no purl.
+- `subject`: `metadata.component`, with a component's fields except
+  `parent`, or `null`.
+- `error`: why the file wasn't read in full, or `null`: `too_large` for
+  a file over the zip-member size limit (phase 09 only), which isn't
+  read, so its `sha256` and `format` are `null`; `not_json`; or
+  `wrong_type` and the path of the CycloneDX field whose type is wrong,
+  such as `wrong_type: components[3].version`.
+
+Only `cyclonedx-json` files without an `error` have `tools`, `subject`
+and `components`. For every other file all three are `null`, so a file
+that was only partly read never looks complete.
+
 ## How a scan runs
 
 `scan` runs every package on a committed list through a fixed sequence of
@@ -369,7 +457,8 @@ A scan runs in two parts with a manual step between them. Part 1 finds the
 bundled libraries; the maintainer then says, in the
 [library map](#the-library-map), which upstream project each one comes
 from and how to recognize it; part 2 clones those projects, builds
-recognizers from the map and matches the versions it finds against CVEs.
+recognizers from the map, reads the wheels' SBOMs and matches the
+versions it finds against CVEs.
 The same command runs both parts: a rerun skips finished phases, so after
 the map is edited, `scan` picks up at phase 06.
 
@@ -447,10 +536,10 @@ Part 2:
 6. `06-upstream` (network, per library): clone the repository of every
    library the map names, with a recognizer or not, into the cache, or
    fetch into the existing clone (see [Conventions](#conventions)). The
-   clone is needed for fixed versions (phase 09). The line lists the
+   clone is needed for fixed versions (phase 10). The line lists the
    release tags the library's **tags** matches, each with the version it
    names. A library whose **tags** matches no tag is an `error` line, so a
-   wrong repo or a misspelled pattern shows up before phase 09 relies on
+   wrong repo or a misspelled pattern shows up before phase 10 relies on
    it. Version 1 clones only from GitHub: a library whose repo is elsewhere
    gets a `skipped` line with reason `not_github`, and its map row keeps
    the real upstream URL.
@@ -482,11 +571,17 @@ Part 2:
    ambiguous version, or why there is none (roadmap 4.5).
    A package that wasn't scanned shows the phase where it stopped and
    that phase's reason, such as `skipped at 02-fetch: too_large`.
-9. `09-cves` (network, per library): candidate CVEs from NVD, by the map's
-   CPE, and OSV, by its OSV identifier, checked against the curated CVE
-   table (section 6). Fixed versions come from the release tags that
-   contain each fix commit, in phase 06's clone.
-10. `10-match` (per package): each library version that falls inside a
+9. `09-sboms` (per package): `sbom` records for the wheel (see
+   [SBOMs in wheels](#sboms-in-wheels)), read from the wheel at phase
+   02's path once its sha256 matches phase 01's. Files over the
+   zip-member size limit aren't read. A missing or changed wheel makes
+   the package's line `error`, so rerunning phase 09 needs the wheel
+   cache. A wheel with no SBOM gets an `ok` line with no records.
+10. `10-cves` (network, per library): candidate CVEs from NVD, by the map's
+    CPE, and OSV, by its OSV identifier, checked against the curated CVE
+    table (section 6). Fixed versions come from the release tags that
+    contain each fix commit, in phase 06's clone.
+11. `11-match` (per package): each library version that falls inside a
     CVE's affected range, with its evidence level. A match is a candidate
     for investigation, not a finding.
 
@@ -593,9 +688,10 @@ Rules:
   `schema_version`, `name` or `library`, `status` (`ok`, `skipped` or
   `error`), `reason`, and the phase's data. Per-binary results are nested
   inside the package's line, in the `inspect`, `strings` and `fingerprint`
-  record formats. A package whose line in the previous per-package phase isn't
-  `ok` gets a `skipped` line, never a missing one, whose reason is the phase
-  where its line first wasn't `ok` (such as `02-fetch`). Per-library phases
+  record formats, and per-file results in the `sbom` format. A package
+  whose line in the previous per-package phase isn't `ok` gets a
+  `skipped` line, never a missing one, whose reason is the phase where
+  its line first wasn't `ok` (such as `02-fetch`). Per-library phases
   never skip a library over an earlier line; one that needs an earlier phase's
   result reads that line itself. Every finished phase file has exactly one
   line per package or library. A bad zip or malformed ELF becomes an `error`
@@ -617,7 +713,7 @@ Rules:
   interrupted was the last. The next run stops at pre-flight until the
   file is deleted.
 - **One phase at a time, no retries.** An `error` line stands. Only phases
-  01, 02, 06 and 09 use the network, through an HTTP client (or, for 06,
+  01, 02, 06 and 10 use the network, through an HTTP client (or, for 06,
   the git command) that tests replace with recorded responses or a
   synthetic repository.
 - When every phase finishes, `scan` exits 0, even if some lines are
@@ -874,10 +970,17 @@ again only rows.
 
 ### 5. SBOM comparison
 
-- **5.1** Read PEP 770 SBOMs (CycloneDX JSON) into components.
-  **← current**
+- **5.1** ✓ `pypiscan sbom <wheel>` and phase 09, as described in
+  [SBOMs in wheels](#sboms-in-wheels): each file in a wheel's
+  `.dist-info/sboms/`, its format and tools, and each CycloneDX
+  component, kept apart from fingerprint records. CVEs and matching
+  move to phases 10 and 11. Manual check: Pillow 12.3.0,
+  psycopg2-binary 2.9.13 and cryptography 50.0.2 give the SBOMs the
+  top-100 scan found, and lxml 6.1.3 none.
 - **5.2** Compare SBOM claims against fingerprint results: coverage and
-  agreement statistics.
+  agreement statistics. It decides how a component is tied to a
+  `.libs/` file, which auditwheel's components don't name.
+  **← current**
 
 ### 6. CVE data
 
@@ -887,7 +990,7 @@ again only rows.
   (library code or a bundled tool), disputed status and sources. Seeded with
   CVE-2023-4863. Requires `cpe` and `osv` on the library map's mapped
   rows.
-- **6.2** Phase 09's importer: draft candidate rows for each library from
+- **6.2** Phase 10's importer: draft candidate rows for each library from
   NVD, by CPE, and OSV, by OSV identifier.
 - **6.3** Range verifier: given phase 06's clone and a row's fix commits,
   compute the release tags that contain them and their dates; compare
@@ -901,7 +1004,7 @@ again only rows.
 
 ### 7. Matching
 
-- **7.1** Phase 10, `match`: compare fingerprints against the CVE table and
+- **7.1** Phase 11, `match`: compare fingerprints against the CVE table and
   write candidates with their evidence level into the episode, which is
   outside the repository. Each candidate shows the basis of its version,
   and one whose basis is `bare_version` is marked as needing another source
@@ -925,7 +1028,12 @@ again only rows.
   strings (`compiled_against`) must not be mistaken for the library itself.
   A pattern whose string comes from the library's public header, such as
   OpenSSL's, can't show the library is present outside its own `.libs/`
-  file. Much more involved than the shared-library case.
+  file. Much more involved than the shared-library case. Some wheels'
+  SBOMs say where to look (see [SBOMs in wheels](#sboms-in-wheels)):
+  cargo-cyclonedx lists `-sys` crates for C libraries, such as
+  `zstd-sys 2.0.16+zstd.1.5.7` in polars-runtime-32 2.0.0 and
+  `aws-lc-sys` in several wheels, and cryptography 50.0.2 carries a
+  second SBOM naming OpenSSL 4.0.3. These are claims, not measurements.
 - **Checking patterns at every release tag.** Statically linked libraries
   and time-to-patch need older releases, whose strings can be worded
   differently: before 2.1.0, zlib-ng named and worded its identity string
@@ -1013,16 +1121,25 @@ again only rows.
   and libpq from source, but installs krb5 and Cyrus SASL with `yum` on
   its manylinux2014 (CentOS 7) image, so its krb5 1.15.1 and cyrus-sasl
   2.1.26 are CentOS 7's packages. psycopg-binary 3.3.6 carries
-  byte-identical copies (the same auditwheel hashes, such as
-  `libkrb5-fcafa220`). A distribution backports security fixes without
-  changing the version, so an upstream CVE range can flag a fix the
-  package already has. CentOS 7 reached end of life in June 2024, so
-  fixes released after that weren't backported. Level 2 (see
+  byte-identical copies (the same sha256, under the same auditwheel
+  names, such as `libkrb5-fcafa220`). The name alone wouldn't show it:
+  auditwheel names a copy by a hash of the original file's contents,
+  then patches the copy, and both wheels have a `libssl-8bd944e8` whose
+  bytes differ, each naming a different libcrypto. A distribution
+  backports security fixes without changing the version, so an
+  upstream CVE range can flag a fix the package already has. CentOS 7
+  reached end of life in June 2024, so fixes released after that
+  weren't backported. Level 2 (see
   [How findings are classified](#how-findings-are-classified)) needs an
   upstream build, so such a library needs a way to be recognized as a
-  distribution build. One candidate is a `.gnu_debuglink` section, which
-  RPM's debuginfo split adds: psycopg2-binary's krb5 and SASL files have
-  one and its libraries built from source don't, though any build that
+  distribution build. Both wheels' auditwheel SBOMs (see
+  [SBOMs in wheels](#sboms-in-wheels)) name the packages, such as
+  `krb5-libs` 1.15.1-55.el7_9 and `cyrus-sasl-lib` 2.1.26-24.el7_9. The
+  build image's package manager answered that, a stronger signal than a
+  debuglink, though wheels repaired before auditwheel 6.5.0 have no
+  SBOM. Another candidate is a `.gnu_debuglink` section, which RPM's
+  debuginfo split adds: psycopg2-binary's krb5 and SASL files have one
+  and its libraries built from source don't, though any build that
   splits off debug info adds one.
 
 ## Data handling and disclosure
