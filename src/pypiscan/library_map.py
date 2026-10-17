@@ -10,7 +10,8 @@ compiles with ``matcher``, or ``parse_version_function`` for a
 cites an ``identity_file``. A row with no kind marks a library that is
 identified but has no recognizer yet. A ``bare_version`` row's prefix maps
 to no other library. ``cpe`` and ``osv`` may be empty
-until the CVE table (roadmap 6.1) requires them.
+until the CVE table (roadmap 6.1) requires them. ``load_ambiguous_versions``
+reads the list of ambiguous versions against the map's rows.
 """
 
 import csv
@@ -255,8 +256,9 @@ def _clash(row: MapRow, earlier: list[tuple[int, MapRow]]) -> str | None:
     return None
 
 
-def load_library_map(path: Path) -> list[MapRow]:
-    """Read and validate a library map, keeping its rows in order."""
+def _read(path: Path, columns: list[str]) -> list[tuple[int, dict[str, str]]]:
+    """Each non-empty row of a CSV file with ``columns`` as its header, with
+    its line number."""
     try:
         with path.open(encoding="utf-8", newline="") as f:
             reader = csv.reader(f)
@@ -264,23 +266,60 @@ def load_library_map(path: Path) -> list[MapRow]:
             rows = [(reader.line_num, row) for row in reader]
     except (OSError, UnicodeDecodeError, csv.Error) as exc:
         raise LibraryMapError(f"{path}: {exc}") from exc
-    if header != COLUMNS:
+    if header != columns:
         raise LibraryMapError(
-            f"{path}: header must be {','.join(COLUMNS)}, got {header!r}"
+            f"{path}: header must be {','.join(columns)}, got {header!r}"
         )
-    result: list[tuple[int, MapRow]] = []
+    result: list[tuple[int, dict[str, str]]] = []
     for line, fields in rows:
         if not fields:
             continue
         where = f"{path}:{line}"
-        if len(fields) != len(COLUMNS):
+        if len(fields) != len(columns):
             raise LibraryMapError(
-                f"{where}: expected {len(COLUMNS)} fields, got {len(fields)}"
+                f"{where}: expected {len(columns)} fields, got {len(fields)}"
             )
-        values = dict(zip(COLUMNS, fields, strict=True))
+        result.append((line, dict(zip(columns, fields, strict=True))))
+    return result
+
+
+def load_library_map(path: Path) -> list[MapRow]:
+    """Read and validate a library map, keeping its rows in order."""
+    result: list[tuple[int, MapRow]] = []
+    for line, values in _read(path, COLUMNS):
         row = MapRow(**values)
         problem = _row_problem(values) or _clash(row, result)
         if problem:
-            raise LibraryMapError(f"{where}: {problem}")
+            raise LibraryMapError(f"{path}:{line}: {problem}")
         result.append((line, row))
     return [row for _, row in result]
+
+
+AMBIGUOUS_COLUMNS = ["library", "version", "ambiguous_with"]
+# For each library, each version as read and the releases it may also be.
+type Ambiguous = dict[str, dict[str, list[str]]]
+
+
+def load_ambiguous_versions(path: Path, rows: list[MapRow]) -> Ambiguous:
+    """Read and validate the list of ambiguous versions (README "Ambiguous
+    versions") against the loaded map's rows."""
+    mapped = {row.library for row in rows if row.library != SKIP}
+    result: Ambiguous = {}
+    for line, values in _read(path, AMBIGUOUS_COLUMNS):
+        library, version, other = (values[c] for c in AMBIGUOUS_COLUMNS)
+        empty = [c for c in AMBIGUOUS_COLUMNS if not values[c]]
+        if empty:
+            problem = f"{', '.join(empty)} is empty"
+        elif library not in mapped:
+            problem = f"library {library!r} isn't mapped in the library map"
+        elif bad := [v for v in (version, other) if not re.fullmatch(VERSION, v)]:
+            problem = f"{bad[0]!r} isn't a version"
+        elif version == other:
+            problem = "version and ambiguous_with are the same"
+        elif other in result.get(library, {}).get(version, []):
+            problem = f"{library} {version} {other} is listed twice"
+        else:
+            result.setdefault(library, {}).setdefault(version, []).append(other)
+            continue
+        raise LibraryMapError(f"{path}:{line}: {problem}")
+    return result

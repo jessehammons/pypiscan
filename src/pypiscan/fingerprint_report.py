@@ -2,15 +2,16 @@
 maps to, with the version and its basis, or why there is none.
 
 See README "How a scan runs" (phase 08) and roadmap 4.5. ``report`` is a pure
-function of phases 05, 07 and 08's lines and the library map's rows;
-``scan`` reads the files and writes the result as ``fingerprint-report.md``.
+function of phases 05, 07 and 08's lines, the library map's rows and the list
+of ambiguous versions (roadmap 4.7); ``scan`` reads the files and writes the
+result as ``fingerprint-report.md``.
 """
 
 from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import cast
 
-from pypiscan.library_map import SKIP, MapRow
+from pypiscan.library_map import SKIP, Ambiguous, MapRow
 from pypiscan.package_list import Package
 
 Line = Mapping[str, object]
@@ -32,7 +33,7 @@ def _row(*cells: str) -> str:
     return "| " + " | ".join(_cell(c) for c in cells) + " |"
 
 
-def _recorded(record: Line) -> tuple[str, str, str]:
+def _recorded(record: Line, ambiguous: Ambiguous) -> tuple[str, str, str]:
     """Version, basis and note for a library with a phase 08 record."""
     version, basis = record["version"], str(record["basis"])
     notes: list[str] = []
@@ -42,6 +43,9 @@ def _recorded(record: Line) -> tuple[str, str, str]:
         notes.append("conflict")
     if basis == "bare_version":
         notes.append("needs another source")
+    others = ambiguous.get(str(record["library"]), {}).get(str(version), [])
+    if version is not None and others:
+        notes.append(f"ambiguous: may also be {' or '.join(others)}")
     if version is None:
         return NONE, NONE, "; ".join(notes)
     return str(version), basis, "; ".join(notes)
@@ -61,6 +65,7 @@ def _section(
     fingerprints: Line,
     recognizers: Mapping[str, Line],
     by_prefix: Mapping[str, list[str]],
+    ambiguous: Ambiguous,
 ) -> list[str]:
     out = [f"## {package.name} {package.version}", ""]
     if fingerprints["status"] != "ok":
@@ -83,7 +88,7 @@ def _section(
             if library == SKIP:
                 cells = (NONE, NONE, "not tracked")
             elif record is not None:
-                cells = _recorded(record)
+                cells = _recorded(record, ambiguous)
             elif _has_recognizers(recognizers.get(library), found["prefix"]):
                 cells = (NONE, NONE, "not detected")
             else:
@@ -98,9 +103,11 @@ def report(
     recognizers: Mapping[str, Line],
     fingerprints: Mapping[str, Line],
     rows: Sequence[MapRow],
+    ambiguous: Ambiguous,
 ) -> str:
     """The report's text, from phases 05 and 08's lines keyed by package
-    name, phase 07's keyed by library, and the map's rows."""
+    name, phase 07's keyed by library, the map's rows and the list of
+    ambiguous versions."""
     by_prefix: dict[str, list[str]] = {}
     for row in rows:
         names = by_prefix.setdefault(row.prefix, [])
@@ -114,6 +121,7 @@ def report(
             fingerprints[package.name],
             recognizers,
             by_prefix,
+            ambiguous,
         )
         out.append("")
     return "\n".join(out)

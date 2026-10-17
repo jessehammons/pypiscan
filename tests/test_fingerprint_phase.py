@@ -207,9 +207,9 @@ def test_noise_filter_applies() -> None:
         lib = string("libpng version 1.6.58", 10, section)
         assert records(file("libpng16", lib)) == []
     # The bare pattern matches an object identifier; the noise filter drops it.
-    assert records(file("liblzma", string("2.16.840.1.101.3.4.1.42", 10))) == []
-    [record] = records(file("liblzma", string("5.8.3", 10)))
-    assert summary(record) == ("xz", "5.8.3", "bare_version", False)
+    assert records(file("libsodium", string("2.16.840.1.101.3.4.1.42", 10))) == []
+    [record] = records(file("libsodium", string("1.0.22", 10)))
+    assert summary(record) == ("libsodium", "1.0.22", "bare_version", False)
 
 
 def test_recognizers_run_only_under_their_prefix() -> None:
@@ -227,10 +227,10 @@ def test_package_with_no_libs_files_is_ok_with_no_records() -> None:
 
 
 def test_records_follow_phase_05_order() -> None:
-    lzma = file("liblzma", string("5.8.3", 10))
+    sodium = file("libsodium", string("1.0.22", 10))
     png = file("libpng16", string("libpng version 1.6.58", 10))
-    found = records(lzma, png)
-    assert [r["library"] for r in found] == ["xz", "libpng"]
+    found = records(sodium, png)
+    assert [r["library"] for r in found] == ["libsodium", "libpng"]
 
 
 def ok_line(library: str, *entries: tuple[str, str, str]) -> Line:
