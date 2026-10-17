@@ -1002,6 +1002,21 @@ again only rows.
   is among those 106 commits but won't miss one fixed later.
   openblas-libs records each build's exact commit in
   `openblas_commit.txt`, which 6.3's fix-commit check could use.
+  scipy 1.18.1's says `OpenBLAS 0.3.31.dev`, OpenBLAS's own version
+  on its development branch between the 0.3.31 and 0.3.32 releases;
+  the string doesn't say which commit was built.
+- **Libraries from the build image's packages.** auditwheel copies every
+  library a wheel's binaries load, including the build image's own
+  distribution packages. psycopg2-binary 2.9.13 builds OpenSSL, OpenLDAP
+  and libpq from source, but installs krb5 and Cyrus SASL with `yum` on
+  its manylinux2014 (CentOS 7) image, so its krb5 1.15.1 and cyrus-sasl
+  2.1.26 are CentOS 7's packages. A distribution backports security
+  fixes without changing the version, so an upstream CVE range can flag
+  a fix the package already has. CentOS 7 reached end of life in June
+  2024, so fixes released after that weren't backported. Level 2 (see
+  [How findings are classified](#how-findings-are-classified)) needs an
+  upstream build, so such a library needs a way to be recognized as a
+  distribution build, such as the packager's build paths in its strings.
 
 ## Data handling and disclosure
 
