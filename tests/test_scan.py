@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import signal
@@ -106,6 +107,8 @@ def test_scan_runs_every_phase(dirs: Dirs, capsys: pytest.CaptureFixture[str]) -
     assert "03-inspect: 0 ok, 2 skipped, 1 error" in err
     assert "04-strings: 0 ok, 3 skipped, 0 error" in err
     assert "05-libraries: 0 ok, 3 skipped, 0 error" in err
+    assert "08-fingerprint: 0 ok, 3 skipped, 0 error" in err
+    assert "09-sboms: 0 ok, 3 skipped, 0 error" in err
     # The map names no library, so phases 06 and 07 have no lines.
     assert "06-upstream: 0 ok, 0 skipped, 0 error" in err
     assert "07-recognizers: 0 ok, 0 skipped, 0 error" in err
@@ -748,7 +751,19 @@ def stub_phases(client: object, cache_dir: Path, episode: Path) -> list[Phase]:
     """Phases 01 to 04 as stubs over LIBS, then the real phase 05."""
 
     def resolve(package: Package, earlier: Mapping[str, Line]) -> Result:
-        return Result("ok") if package.name in LIBS else Result("error", "HTTP 404")
+        if package.name not in LIBS:
+            return Result("error", "HTTP 404")
+        # demo's wheel carries an SBOM for phase 09; puredemo's doesn't.
+        members = {"demo-1.0.dist-info/sboms/x.json": b"{}"}
+        wheel = build_wheel(
+            cache_dir / f"{package.name}.whl",
+            members if package.name == "demo" else {},
+        )
+        sha256 = hashlib.sha256(wheel.read_bytes()).hexdigest()
+        return Result("ok", None, {"sha256": sha256})
+
+    def fetch(package: Package, earlier: Mapping[str, Line]) -> Result:
+        return Result("ok", None, {"path": str(cache_dir / f"{package.name}.whl")})
 
     def inspect(package: Package, earlier: Mapping[str, Line]) -> Result:
         records: list[object] = [
@@ -784,7 +799,7 @@ def stub_phases(client: object, cache_dir: Path, episode: Path) -> list[Phase]:
 
     return [
         Phase("01-resolve", resolve),
-        phase("02-fetch"),
+        Phase("02-fetch", fetch),
         Phase("03-inspect", inspect),
         Phase("04-strings", strings),
         scan_module.libraries_phase(episode),
@@ -849,6 +864,7 @@ def test_scan_stops_for_the_manual_step(
     assert "06-upstream: 1 ok, 0 skipped, 0 error" in err
     assert "07-recognizers: 1 ok, 0 skipped, 0 error" in err
     assert "08-fingerprint: 2 ok, 1 skipped, 0 error" in err
+    assert err.endswith("09-sboms: 2 ok, 1 skipped, 0 error\n")
     assert todo.read_text() == f"{header}\n"
     [libpng] = dirs.lines("06-upstream")
     assert libpng["library"] == "libpng"
@@ -881,11 +897,45 @@ def test_scan_stops_for_the_manual_step(
     assert (record["library"], record["version"]) == ("libpng", "1.6.50")
     assert (missing["status"], missing["reason"]) == ("skipped", "01-resolve")
 
-    # A rerun skips every phase, phase 08 included, and lists each once.
+    demo, pure, missing = dirs.lines("09-sboms")
+    [sbom] = cast(list[Line], demo["records"])
+    assert (sbom["path"], sbom["format"]) == (
+        "demo-1.0.dist-info/sboms/x.json",
+        "other",
+    )
+    assert (pure["status"], pure["records"]) == ("ok", [])
+    assert (missing["status"], missing["reason"]) == ("skipped", "01-resolve")
+
+    # A rerun skips every phase, phases 08 and 09 included, and lists each
+    # once.
     assert run(dirs, "--count", "3") == 0
     err = capsys.readouterr().err
     assert "08-fingerprint: already finished, skipped" in err
+    assert err.endswith("09-sboms: already finished, skipped\n")
     assert err.count("05-libraries: already finished, skipped") == 1
+
+    # An episode finished through phase 08 before phase 09 existed runs only
+    # phase 09, with no file deleted.
+    lines_09 = dirs.lines("09-sboms")
+    (dirs.episode / "09-sboms.jsonl").unlink()
+    assert run(dirs, "--count", "3") == 0
+    err = capsys.readouterr().err
+    *finished, last = err.splitlines()
+    assert finished == [
+        f"{name}: already finished, skipped"
+        for name in [
+            "01-resolve",
+            "02-fetch",
+            "03-inspect",
+            "04-strings",
+            "05-libraries",
+            "06-upstream",
+            "07-recognizers",
+            "08-fingerprint",
+        ]
+    ]
+    assert last == "09-sboms: 2 ok, 1 skipped, 0 error"
+    assert dirs.lines("09-sboms") == lines_09
 
     # Every run with phase 08 finished rewrites the fingerprint report.
     report = dirs.episode / "fingerprint-report.md"
@@ -906,13 +956,14 @@ def test_scan_stops_for_the_manual_step(
 def test_report_shows_why_a_package_stopped_at_phase_02(
     dirs: Dirs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def too_large(package: Package, earlier: Mapping[str, Line]) -> Result:
-        if package.name == "puredemo":
-            return Result("skipped", "too_large")
-        return Result("ok")
-
     def with_too_large(client: object, cache_dir: Path, episode: Path) -> list[Phase]:
         stubs = stub_phases(client, cache_dir, episode)
+
+        def too_large(package: Package, earlier: Mapping[str, Line]) -> Result:
+            if package.name == "puredemo":
+                return Result("skipped", "too_large")
+            return stubs[1].run(package, earlier)
+
         return [stubs[0], Phase("02-fetch", too_large), *stubs[2:]]
 
     monkeypatch.setattr(scan_module, "phases", with_too_large)
@@ -1127,8 +1178,8 @@ def test_changed_map_after_phase_06_fails_preflight(
     assert run(dirs, "--count", "3") == 2
     assert capsys.readouterr().err == (
         "pypiscan scan: error: the library map has changed since phase 06 ran. "
-        "Delete 06-upstream.jsonl, 07-recognizers.jsonl, 08-fingerprint.jsonl "
-        "to rerun phase 06 and every later phase.\n"
+        "Delete 06-upstream.jsonl, 07-recognizers.jsonl, 08-fingerprint.jsonl, "
+        "09-sboms.jsonl to rerun phase 06 and every later phase.\n"
     )
 
     # Without a recorded sha256, the map can't be checked either.

@@ -12,7 +12,6 @@ import json
 import re
 import signal
 import zipfile
-import zlib
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
@@ -54,10 +53,12 @@ from pypiscan.pypi import (
     select_target,
 )
 from pypiscan.wheel_inspect import (
+    ZIP_ERRORS,
     SkippedMember,
     WheelError,
     inspect_wheel,
 )
+from pypiscan.wheel_sboms import sboms_wheel
 from pypiscan.wheel_strings import BinaryStrings, strings_wheel
 
 SCHEMA_VERSION = 1
@@ -260,17 +261,18 @@ def read_members(wheel: Path, expected: Mapping[str, str]) -> dict[str, bytes]:
     found: dict[str, bytes] = {}
     try:
         with zipfile.ZipFile(wheel) as zf:
-            for path, sha256 in expected.items():
+            for path in expected:
                 try:
                     found[path] = zf.read(path)
                 except KeyError:
                     raise MemberError(f"{path} is missing from {wheel.name}") from None
-                if hashlib.sha256(found[path]).hexdigest() != sha256:
-                    raise MemberError(f"{path}'s sha256 differs from phase 04's")
-    except (zipfile.BadZipFile, zlib.error, EOFError) as exc:
+    except ZIP_ERRORS as exc:
         raise MemberError(f"{wheel}: not a valid zip file ({exc})") from exc
     except OSError as exc:
         raise MemberError(f"{wheel}: {exc}") from exc
+    for path, sha256 in expected.items():
+        if hashlib.sha256(found[path]).hexdigest() != sha256:
+            raise MemberError(f"{path}'s sha256 differs from phase 04's")
     return found
 
 
@@ -371,6 +373,31 @@ def fingerprint_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
         return Result("ok", None, {"wheel": wheel, "records": records})
 
     return Phase("08-fingerprint", run)
+
+
+def sboms_phase() -> Phase[Package]:
+    """Phase 09: ``sbom`` records for each wheel, read from phase 02's path
+    once its sha256 matches phase 01's. Files over the zip-member size limit
+    aren't read."""
+
+    def run(package: Package, earlier: Mapping[str, Line]) -> Result:
+        wheel_path = Path(cast(str, earlier["02-fetch"]["path"]))
+        try:
+            if not wheel_path.is_file():
+                return Result("error", f"wheel {wheel_path} is missing")
+            if _sha256(wheel_path) != earlier["01-resolve"]["sha256"]:
+                reason = f"wheel {wheel_path}'s sha256 differs from phase 01's"
+                return Result("error", reason)
+            records = sboms_wheel(wheel_path, ZIP_MEMBER_SIZE_LIMIT)
+        except (OSError, WheelError) as exc:
+            return Result("error", str(exc))
+        return Result(
+            "ok",
+            None,
+            {"wheel": wheel_path.name, "records": cast(list[object], records)},
+        )
+
+    return Phase("09-sboms", run)
 
 
 def phases(client: HttpClient, cache_dir: Path, episode: Path) -> list[Phase[Package]]:
@@ -490,7 +517,8 @@ def write_json(path: Path, value: object) -> None:
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    with path.open("rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
 
 
 def git_work_tree(path: Path) -> Path | None:
@@ -812,11 +840,11 @@ def scan(
         status = run_phases(episode, libraries, part_2, stop, err, key="library")
         if status:
             return status
-        # Phase 08 is per package again, after the per-library phases: it
-        # runs the recognizers phase 07 recorded, and its skip rule looks at
-        # part 1's lines.
+        # Phases 08 and 09 are per package again, after the per-library
+        # phases: 08 runs the recognizers phase 07 recorded, and its skip
+        # rule looks at part 1's lines.
         recognizers = _read_lines(episode / "07-recognizers.jsonl", "library")
-        part_3 = [fingerprint_phase(list(recognizers.values()))]
+        part_3 = [fingerprint_phase(list(recognizers.values())), sboms_phase()]
         names = [phase.name for phase in part_1]
         status = run_phases(episode, packages, part_3, stop, err, finished=names)
         if (episode / "08-fingerprint.jsonl").is_file():
