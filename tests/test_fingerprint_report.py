@@ -1,4 +1,4 @@
-"""The fingerprint report on hand-built phase 05, 07 and 08 lines and map rows."""
+"""The fingerprint report on hand-built phase 01 to 08 lines and map rows."""
 
 from pypiscan.fingerprint_report import INTRO, report
 from pypiscan.library_map import MapRow
@@ -97,14 +97,48 @@ PREFIXES = [
     "liba", "libb", "libc", "libd", "libe", "libf", "libg", "libh",
     "libgfortran", "libmulti", "libk5",
 ]  # fmt: skip
-PHASE_05: dict[str, Line] = {
-    "a": {"name": "a", "status": "ok", "libraries": [
-        {"path": path(p), "prefix": p} for p in PREFIXES
-    ]},
-    "b": {"name": "b", "status": "skipped", "reason": "02-fetch"},
-    "c": {"name": "c", "status": "error", "reason": "bad zip"},
-    "d": {"name": "d", "status": "ok", "libraries": []},
-}  # fmt: skip
+PART_1 = [
+    "01-resolve", "02-fetch", "03-inspect", "04-strings", "05-libraries",
+]  # fmt: skip
+
+
+def stopped(name: str, phase: str, status: str, reason: str) -> dict[str, Line]:
+    """Part 1's lines for a package whose line first wasn't ok at ``phase``."""
+    at = PART_1.index(phase)
+    lines: dict[str, Line] = {}
+    for i, each in enumerate(PART_1):
+        if i < at:
+            lines[each] = {"name": name, "status": "ok", "reason": None}
+        elif i == at:
+            lines[each] = {"name": name, "status": status, "reason": reason}
+        else:
+            lines[each] = {"name": name, "status": "skipped", "reason": phase}
+    return lines
+
+
+def ok_until_05(name: str, libraries: list[dict[str, str]]) -> dict[str, Line]:
+    lines: dict[str, Line] = {
+        each: {"name": name, "status": "ok", "reason": None} for each in PART_1
+    }
+    lines["05-libraries"] = {**lines["05-libraries"], "libraries": libraries}
+    return lines
+
+
+def by_phase(packages: dict[str, dict[str, Line]]) -> dict[str, dict[str, Line]]:
+    """Per-package lines regrouped as ``report`` takes them: by phase, then
+    by package."""
+    return {
+        each: {name: lines[each] for name, lines in packages.items()} for each in PART_1
+    }
+
+
+BY_PACKAGE = {
+    "a": ok_until_05("a", [{"path": path(p), "prefix": p} for p in PREFIXES]),
+    "b": stopped("b", "02-fetch", "skipped", "too_large"),
+    "c": stopped("c", "03-inspect", "error", "bad zip"),
+    "d": ok_until_05("d", []),
+    "e": stopped("e", "01-resolve", "skipped", "no_target"),
+}
 PHASE_08: dict[str, Line] = {
     "a": {
         "name": "a",
@@ -123,6 +157,7 @@ PHASE_08: dict[str, Line] = {
     },
     "b": {"name": "b", "status": "skipped", "reason": "02-fetch"},
     "c": {"name": "c", "status": "skipped", "reason": "03-inspect"},
+    "e": {"name": "e", "status": "skipped", "reason": "01-resolve"},
     "d": {
         "name": "d",
         "status": "ok",
@@ -132,7 +167,8 @@ PHASE_08: dict[str, Line] = {
     },
 }
 PACKAGES = [Package("a", "1.0"), Package("b", "2.0"), Package("c", "3.0")]
-PACKAGES.append(Package("d", "2.0"))
+PACKAGES += [Package("d", "2.0"), Package("e", "5.0")]
+PHASES_01_TO_05 = by_phase(BY_PACKAGE)
 
 EXPECTED = (
     INTRO
@@ -158,23 +194,28 @@ EXPECTED = (
 
 ## b 2.0
 
-skipped: 02-fetch
+skipped at 02-fetch: too_large
 
 ## c 3.0
 
-skipped: 03-inspect
+error at 03-inspect: bad zip
 
 ## d 2.0
 
 `d-2.0-py3-none-manylinux_2_28_x86_64.whl`
 
 No .libs/ files.
+
+## e 5.0
+
+skipped at 01-resolve: no_target
 """
 )
 
 
 def test_report_covers_every_case() -> None:
-    assert report(PACKAGES, PHASE_05, PHASE_07, PHASE_08, ROWS, {}) == EXPECTED
+    text = report(PACKAGES, PHASES_01_TO_05, PHASE_07, PHASE_08, ROWS, {})
+    assert text == EXPECTED
 
 
 def test_intro_is_verbatim() -> None:
@@ -185,10 +226,18 @@ def test_intro_is_verbatim() -> None:
     )
 
 
-def test_error_line_shows_status_and_reason() -> None:
+def test_phase_08s_own_error_names_phase_08() -> None:
     error: Line = {"name": "c", "status": "error", "reason": "bad zip"}
-    text = report([Package("c", "3.0")], {}, {}, {"c": error}, [], {})
-    assert text == INTRO + "\n## c 3.0\n\nerror: bad zip\n"
+    part_1 = by_phase({"c": ok_until_05("c", [])})
+    text = report([Package("c", "3.0")], part_1, {}, {"c": error}, [], {})
+    assert text == INTRO + "\n## c 3.0\n\nerror at 08-fingerprint: bad zip\n"
+
+
+def test_a_pipe_in_the_reason_is_escaped() -> None:
+    part_1 = by_phase({"c": stopped("c", "03-inspect", "error", "bad | zip")})
+    skipped: Line = {"name": "c", "status": "skipped", "reason": "03-inspect"}
+    text = report([Package("c", "3.0")], part_1, {}, {"c": skipped}, [], {})
+    assert text.endswith("\nerror at 03-inspect: bad \\| zip\n")
 
 
 def test_a_version_never_shows_without_its_basis() -> None:
@@ -210,12 +259,9 @@ def test_ambiguous_versions_are_noted() -> None:
         row("libother", "other", VF),
     ]
     prefixes = ["liblcms", "libhb", "libnull", "libother"]
-    phase_05: dict[str, Line] = {
-        "a": {
-            "status": "ok",
-            "libraries": [{"path": path(p), "prefix": p} for p in prefixes],
-        }
-    }
+    part_1 = by_phase(
+        {"a": ok_until_05("a", [{"path": path(p), "prefix": p} for p in prefixes])}
+    )
     phase_07: dict[str, Line] = {
         "lcms": ok_07("lcms", "liblcms", "libnull"),
         "hb": ok_07("hb", "libhb"),
@@ -231,7 +277,7 @@ def test_ambiguous_versions_are_noted() -> None:
     phase_08: dict[str, Line] = {
         "a": {"status": "ok", "wheel": "a.whl", "records": records}
     }
-    text = report([Package("a", "1.0")], phase_05, phase_07, phase_08, rows, AMBIGUOUS)
+    text = report([Package("a", "1.0")], part_1, phase_07, phase_08, rows, AMBIGUOUS)
     table = [line for line in text.splitlines() if line.startswith("| lib")]
     assert table == [
         f"| liblcms-1a2b3c4d.so.1 | lcms | 2.19.0 | {VF} | "

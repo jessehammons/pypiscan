@@ -2,9 +2,9 @@
 maps to, with the version and its basis, or why there is none.
 
 See README "How a scan runs" (phase 08) and roadmap 4.5. ``report`` is a pure
-function of phases 05, 07 and 08's lines, the library map's rows and the list
-of ambiguous versions (roadmap 4.7); ``scan`` reads the files and writes the
-result as ``fingerprint-report.md``.
+function of phases 01 to 05, 07 and 08's lines, the library map's rows and
+the list of ambiguous versions (roadmap 4.7); ``scan`` reads the files and
+writes the result as ``fingerprint-report.md``.
 """
 
 from collections.abc import Mapping, Sequence
@@ -22,6 +22,7 @@ investigating, not a conclusion. Its basis says which signal it rests on;
 see "How versions are identified" in the README.
 """
 NONE = "—"
+FINGERPRINT = "08-fingerprint"
 HEADER = "| file | library | version | basis | note |\n|---|---|---|---|---|"
 
 
@@ -59,9 +60,24 @@ def _has_recognizers(line: Line | None, prefix: str) -> bool:
     return any(entry["prefix"] == prefix for entry in entries)
 
 
+def _stopped(package: str, line: Line, part_1: Mapping[str, Mapping[str, Line]]) -> str:
+    """``<status> at <phase>: <reason>`` for a package phase 08 didn't scan.
+
+    A skipped line's reason names the phase where the package's line first
+    wasn't ok; that phase's line gives the reason. Any other reason is phase
+    08's own.
+    """
+    phase = str(line["reason"])
+    if phase in part_1:
+        line = part_1[phase][package]
+    else:
+        phase = FINGERPRINT
+    return f"{line['status']} at {phase}: {_cell(str(line['reason']))}"
+
+
 def _section(
     package: Package,
-    libraries: Line | None,
+    part_1: Mapping[str, Mapping[str, Line]],
     fingerprints: Line,
     recognizers: Mapping[str, Line],
     by_prefix: Mapping[str, list[str]],
@@ -69,10 +85,11 @@ def _section(
 ) -> list[str]:
     out = [f"## {package.name} {package.version}", ""]
     if fingerprints["status"] != "ok":
-        out.append(f"{fingerprints['status']}: {fingerprints['reason']}")
+        out.append(_stopped(package.name, fingerprints, part_1))
         return out
     out += [f"`{fingerprints['wheel']}`", ""]
-    files = cast(list[Mapping[str, str]], (libraries or {}).get("libraries") or [])
+    libraries = part_1.get("05-libraries", {}).get(package.name) or {}
+    files = cast(list[Mapping[str, str]], libraries.get("libraries") or [])
     if not files:
         out.append("No .libs/ files.")
         return out
@@ -99,15 +116,15 @@ def _section(
 
 def report(
     packages: Sequence[Package],
-    libraries: Mapping[str, Line],
+    part_1: Mapping[str, Mapping[str, Line]],
     recognizers: Mapping[str, Line],
     fingerprints: Mapping[str, Line],
     rows: Sequence[MapRow],
     ambiguous: Ambiguous,
 ) -> str:
-    """The report's text, from phases 05 and 08's lines keyed by package
-    name, phase 07's keyed by library, the map's rows and the list of
-    ambiguous versions."""
+    """The report's text, from phases 01 to 05's lines keyed by phase and
+    package name, phase 08's keyed by package name, phase 07's keyed by
+    library, the map's rows and the list of ambiguous versions."""
     by_prefix: dict[str, list[str]] = {}
     for row in rows:
         names = by_prefix.setdefault(row.prefix, [])
@@ -117,7 +134,7 @@ def report(
     for package in packages:
         out += _section(
             package,
-            libraries.get(package.name),
+            part_1,
             fingerprints[package.name],
             recognizers,
             by_prefix,

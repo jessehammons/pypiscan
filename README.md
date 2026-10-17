@@ -479,6 +479,8 @@ Part 2:
    `library-map-todo.csv`: for each package, every `.libs/` file and each
    library its prefix maps to, with the version and its basis, marking an
    ambiguous version, or why there is none (roadmap 4.5).
+   A package that wasn't scanned shows the phase where it stopped and
+   that phase's reason, such as `skipped at 02-fetch: too_large`.
 9. `09-cves` (network, per library): candidate CVEs from NVD, by the map's
    CPE, and OSV, by its OSV identifier, checked against the curated CVE
    table (section 6). Fixed versions come from the release tags that
