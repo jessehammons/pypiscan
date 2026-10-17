@@ -996,27 +996,34 @@ again only rows.
   with a version no release has. numpy 2.5.4's OpenBLAS says
   `OpenBLAS 0.3.34.106.0`: scipy-openblas builds OpenBLAS at a
   commit and writes its own package version (the tag, the commits
-  since it and a build number) into OpenBLAS's `VERSION`, so this
-  is OpenBLAS 106 commits after 0.3.34. Compared as a version it
-  falls between 0.3.34 and 0.3.35, so 7.1 may flag a CVE whose fix
-  is among those 106 commits but won't miss one fixed later.
+  since it and a build number) into OpenBLAS's `VERSION`, so this is
+  OpenBLAS 106 commits after 0.3.34. Compared as a version it falls
+  between 0.3.34 and 0.3.35, so 7.1 may flag a CVE whose fix is
+  among those 106 commits but won't miss one fixed later.
   openblas-libs records each build's exact commit in
   `openblas_commit.txt`, which 6.3's fix-commit check could use.
   scipy 1.18.1's says `OpenBLAS 0.3.31.dev`, OpenBLAS's own version
   on its development branch between the 0.3.31 and 0.3.32 releases;
-  the string doesn't say which commit was built.
+  the string doesn't say which commit was built. It shows OpenBLAS's
+  own version because openblas-libs began writing its package
+  version into `VERSION` only in March 2026, after that build.
 - **Libraries from the build image's packages.** auditwheel copies every
   library a wheel's binaries load, including the build image's own
   distribution packages. psycopg2-binary 2.9.13 builds OpenSSL, OpenLDAP
   and libpq from source, but installs krb5 and Cyrus SASL with `yum` on
   its manylinux2014 (CentOS 7) image, so its krb5 1.15.1 and cyrus-sasl
-  2.1.26 are CentOS 7's packages. A distribution backports security
-  fixes without changing the version, so an upstream CVE range can flag
-  a fix the package already has. CentOS 7 reached end of life in June
-  2024, so fixes released after that weren't backported. Level 2 (see
+  2.1.26 are CentOS 7's packages. psycopg-binary 3.3.6 carries
+  byte-identical copies (the same auditwheel hashes, such as
+  `libkrb5-fcafa220`). A distribution backports security fixes without
+  changing the version, so an upstream CVE range can flag a fix the
+  package already has. CentOS 7 reached end of life in June 2024, so
+  fixes released after that weren't backported. Level 2 (see
   [How findings are classified](#how-findings-are-classified)) needs an
   upstream build, so such a library needs a way to be recognized as a
-  distribution build, such as the packager's build paths in its strings.
+  distribution build. One candidate is a `.gnu_debuglink` section, which
+  RPM's debuginfo split adds: psycopg2-binary's krb5 and SASL files have
+  one and its libraries built from source don't, though any build that
+  splits off debug info adds one.
 
 ## Data handling and disclosure
 
