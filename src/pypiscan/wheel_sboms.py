@@ -10,11 +10,10 @@ wrong type leaves ``tools``, ``subject`` and ``components`` all ``null``.
 import hashlib
 import json
 import zipfile
-import zlib
 from pathlib import Path
 from typing import Literal, TypedDict, cast
 
-from pypiscan.wheel_inspect import WheelError
+from pypiscan.wheel_inspect import ZIP_ERRORS, WheelError
 
 SCHEMA_VERSION = 1
 FIELDS = ("bom-ref", "type", "name", "version", "purl", "scope")
@@ -204,20 +203,22 @@ def sboms_wheel(wheel: Path, max_member_size: int | None = None) -> list[SbomRec
     """
     if not wheel.is_file():
         raise WheelError(f"{wheel}: no such file")
-    records: list[SbomRecord] = []
+    # Each SBOM member's path, size and contents (None when too large), all
+    # read before any is parsed, so the try covers only zipfile's calls.
+    members: list[tuple[str, int, bytes | None]] = []
     try:
         with zipfile.ZipFile(wheel) as zf:
             for info in zf.infolist():
                 if info.is_dir() or not is_sbom(info.filename):
                     continue
-                if max_member_size is not None and info.file_size > max_member_size:
-                    records.append(_record(wheel, info.filename, info.file_size, None))
-                    continue
-                data = zf.read(info)
-                records.append(_record(wheel, info.filename, len(data), data))
-    # As in wheel_inspect.iter_elf_members.
-    except (zipfile.BadZipFile, zlib.error, EOFError) as exc:
+                too_large = max_member_size is not None and (
+                    info.file_size > max_member_size
+                )
+                data = None if too_large else zf.read(info)
+                size = info.file_size if data is None else len(data)
+                members.append((info.filename, size, data))
+    except ZIP_ERRORS as exc:
         raise WheelError(f"{wheel}: not a valid zip file ({exc})") from exc
     except OSError as exc:
         raise WheelError(f"{wheel}: {exc}") from exc
-    return records
+    return [_record(wheel, *member) for member in members]

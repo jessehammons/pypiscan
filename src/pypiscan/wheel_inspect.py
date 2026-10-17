@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import lzma
 import zipfile
 import zlib
 from collections.abc import Iterator
@@ -15,6 +16,24 @@ from elftools.elf.elffile import ELFFile
 
 SCHEMA_VERSION = 2
 ELF_MAGIC = b"\x7fELF"
+# What zipfile raises for an archive it can't read, besides OSError (a bzip2
+# member's corrupt data, or an offset before the start of the file):
+# BadZipFile for a missing or garbled header or a bad CRC; zlib.error and
+# lzma.LZMAError for a deflated or LZMA member's corrupt data; EOFError
+# when a compressed stream ends early; RuntimeError for an encrypted member,
+# and its subclass NotImplementedError for an unknown compression method,
+# strong encryption or patched data; ValueError (UnicodeDecodeError) for a
+# member name flagged UTF-8 that isn't, and ValueError or OverflowError for
+# a zip64 offset near 2**64.
+ZIP_ERRORS = (
+    zipfile.BadZipFile,
+    zlib.error,
+    lzma.LZMAError,
+    EOFError,
+    RuntimeError,
+    ValueError,
+    OverflowError,
+)
 
 
 class WheelError(Exception):
@@ -98,11 +117,7 @@ def iter_elf_members(
                         continue
                     data = ELF_MAGIC + f.read()
                 yield info.filename, data
-    except (zipfile.BadZipFile, zlib.error, EOFError) as exc:
-        # zlib.error is raised when a deflated member's compressed bytes are
-        # garbled; EOFError when a compressed stream ends early. Neither is
-        # a BadZipFile, but to the caller they mean the same thing: this
-        # wheel's zip can't be read as data.
+    except ZIP_ERRORS as exc:
         raise WheelError(f"{wheel}: not a valid zip file ({exc})") from exc
     except OSError as exc:
         raise WheelError(f"{wheel}: {exc}") from exc

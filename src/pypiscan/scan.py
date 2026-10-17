@@ -12,7 +12,6 @@ import json
 import re
 import signal
 import zipfile
-import zlib
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
@@ -54,6 +53,7 @@ from pypiscan.pypi import (
     select_target,
 )
 from pypiscan.wheel_inspect import (
+    ZIP_ERRORS,
     SkippedMember,
     WheelError,
     inspect_wheel,
@@ -261,17 +261,18 @@ def read_members(wheel: Path, expected: Mapping[str, str]) -> dict[str, bytes]:
     found: dict[str, bytes] = {}
     try:
         with zipfile.ZipFile(wheel) as zf:
-            for path, sha256 in expected.items():
+            for path in expected:
                 try:
                     found[path] = zf.read(path)
                 except KeyError:
                     raise MemberError(f"{path} is missing from {wheel.name}") from None
-                if hashlib.sha256(found[path]).hexdigest() != sha256:
-                    raise MemberError(f"{path}'s sha256 differs from phase 04's")
-    except (zipfile.BadZipFile, zlib.error, EOFError) as exc:
+    except ZIP_ERRORS as exc:
         raise MemberError(f"{wheel}: not a valid zip file ({exc})") from exc
     except OSError as exc:
         raise MemberError(f"{wheel}: {exc}") from exc
+    for path, sha256 in expected.items():
+        if hashlib.sha256(found[path]).hexdigest() != sha256:
+            raise MemberError(f"{path}'s sha256 differs from phase 04's")
     return found
 
 
