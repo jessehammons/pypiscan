@@ -58,6 +58,7 @@ from pypiscan.wheel_inspect import (
     WheelError,
     inspect_wheel,
 )
+from pypiscan.wheel_sboms import sboms_wheel
 from pypiscan.wheel_strings import BinaryStrings, strings_wheel
 
 SCHEMA_VERSION = 1
@@ -373,6 +374,31 @@ def fingerprint_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
     return Phase("08-fingerprint", run)
 
 
+def sboms_phase() -> Phase[Package]:
+    """Phase 09: ``sbom`` records for each wheel, read from phase 02's path
+    once its sha256 matches phase 01's. Files over the zip-member size limit
+    aren't read."""
+
+    def run(package: Package, earlier: Mapping[str, Line]) -> Result:
+        wheel_path = Path(cast(str, earlier["02-fetch"]["path"]))
+        try:
+            if not wheel_path.is_file():
+                return Result("error", f"wheel {wheel_path} is missing")
+            if _sha256(wheel_path) != earlier["01-resolve"]["sha256"]:
+                reason = f"wheel {wheel_path}'s sha256 differs from phase 01's"
+                return Result("error", reason)
+            records = sboms_wheel(wheel_path, ZIP_MEMBER_SIZE_LIMIT)
+        except (OSError, WheelError) as exc:
+            return Result("error", str(exc))
+        return Result(
+            "ok",
+            None,
+            {"wheel": wheel_path.name, "records": cast(list[object], records)},
+        )
+
+    return Phase("09-sboms", run)
+
+
 def phases(client: HttpClient, cache_dir: Path, episode: Path) -> list[Phase[Package]]:
     return [
         resolve_phase(client),
@@ -490,7 +516,8 @@ def write_json(path: Path, value: object) -> None:
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    with path.open("rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
 
 
 def git_work_tree(path: Path) -> Path | None:
@@ -812,11 +839,11 @@ def scan(
         status = run_phases(episode, libraries, part_2, stop, err, key="library")
         if status:
             return status
-        # Phase 08 is per package again, after the per-library phases: it
-        # runs the recognizers phase 07 recorded, and its skip rule looks at
-        # part 1's lines.
+        # Phases 08 and 09 are per package again, after the per-library
+        # phases: 08 runs the recognizers phase 07 recorded, and its skip
+        # rule looks at part 1's lines.
         recognizers = _read_lines(episode / "07-recognizers.jsonl", "library")
-        part_3 = [fingerprint_phase(list(recognizers.values()))]
+        part_3 = [fingerprint_phase(list(recognizers.values())), sboms_phase()]
         names = [phase.name for phase in part_1]
         status = run_phases(episode, packages, part_3, stop, err, finished=names)
         if (episode / "08-fingerprint.jsonl").is_file():

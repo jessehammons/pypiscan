@@ -11,6 +11,7 @@ from pypiscan.package_list import check_release
 from pypiscan.pypi import HttpClient, PyPIError, UrllibClient
 from pypiscan.scan import EXIT_PREFLIGHT, scan
 from pypiscan.wheel_inspect import WheelError, inspect_wheel
+from pypiscan.wheel_sboms import sboms_wheel
 from pypiscan.wheel_strings import strings_wheel
 
 
@@ -31,6 +32,10 @@ def inspect(wheel: Path) -> int:
 
 def strings(wheel: Path) -> int:
     return _emit("strings", lambda: strings_wheel(wheel))
+
+
+def sbom(wheel: Path) -> int:
+    return _emit("sbom", lambda: sboms_wheel(wheel))
 
 
 def fingerprint(wheel: Path) -> int:
@@ -65,6 +70,12 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
         help="List the version-like strings in a wheel's ELF binaries as JSON Lines.",
     )
     p_strings.add_argument("wheel", type=Path, help="Path to a .whl file.")
+    p_sbom = sub.add_parser(
+        "sbom",
+        help="List the SBOM files in a wheel's .dist-info/sboms/ directory, "
+        "with their CycloneDX components, as JSON Lines.",
+    )
+    p_sbom.add_argument("wheel", type=Path, help="Path to a .whl file.")
     p_fingerprint = sub.add_parser(
         "fingerprint",
         help="Identify bundled libraries and versions in a wheel as JSON Lines.",
@@ -132,6 +143,8 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
         return fetch(args.release, args.cache_dir, client or UrllibClient())
     if args.command == "strings":
         return strings(args.wheel)
+    if args.command == "sbom":
+        return sbom(args.wheel)
     if args.command == "fingerprint":
         return fingerprint(args.wheel)
     return inspect(args.wheel)
