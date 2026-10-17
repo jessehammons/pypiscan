@@ -82,9 +82,9 @@ def test_classic_zlib_contains() -> None:
     }
 
 
-def test_schema_version_is_2() -> None:
-    # 2 added basis.
-    assert SCHEMA_VERSION == 2
+def test_schema_version_is_3() -> None:
+    # 2 added basis; 3 added the version_function_machine_code kind.
+    assert SCHEMA_VERSION == 3
 
 
 def test_four_part_version_kept_exactly() -> None:

@@ -1,0 +1,10 @@
+prefix	library	function	code	string	version	wheel	member
+libpq	postgresql	PQlibVersion	b81b980200c3		17.11	psycopg2_binary-2.9.13-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl	psycopg2_binary.libs/libpq-a17e3caa.so.5.17
+libavif	libavif	avifVersion	488d0517dd4300c3	1.4.2	1.4.2	pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	pillow.libs/libavif-8a7f9d56.so.16.4.2
+libavif	dav1d	dav1d_version	488d051e674400c3	1.5.3-0-gb546257	1.5.3	pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	pillow.libs/libavif-8a7f9d56.so.16.4.2
+libbrotlidec	brotli	BrotliDecoderVersion	b800200001c3		1.2.0	pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	pillow.libs/libbrotlidec-7e5462ba.so.1.2.0
+libwebp	libwebp	WebPGetDecoderVersion	b800060100c3		1.6.0	pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	pillow.libs/libwebp-51b0b3f7.so.7.2.0
+libwebpdemux	libwebp	WebPGetDemuxVersion	b800060100c3		1.6.0	pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	pillow.libs/libwebpdemux-9fe2abcc.so.2.0.17
+libwebpmux	libwebp	WebPGetMuxVersion	b800060100c3		1.6.0	pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	pillow.libs/libwebpmux-8fb1c9f6.so.3.1.2
+libzmq	libzmq	zmq_version	554889e548897df8488975f0488955e8488b45f8c70004000000488b45f0c70003000000488b45e8c70005000000905dc3		4.3.5	pyzmq-27.2.0-cp312-abi3-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl	pyzmq.libs/libzmq-82f916e6.so.5.2.5
+libfreetype		FT_Library_Version	554889e548897de8488975e0488955d848894dd0c745fc00000000c745f800000000c745f40000000048837de800741e488b45e88b40088945fc488b45e88b400c8945f8488b45e88b40108945f448837de0007409488b45e08b55fc891048837dd8007409488b45d88b55f8891048837dd0007409488b45d08b55f48910905dc3			pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl	pillow.libs/libfreetype-9fc94c80.so.6.20.6

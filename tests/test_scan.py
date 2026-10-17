@@ -841,7 +841,7 @@ def test_scan_stops_for_the_manual_step(
     assert demo["wheel"] == "demo.whl"
     assert demo["records"] == [
         {
-            "schema_version": 2,
+            "schema_version": 3,
             "wheel": "demo.whl",
             "path": path,
             "sha256": f"sha-{path}",

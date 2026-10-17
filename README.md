@@ -282,6 +282,10 @@ gives the version:
   first, with `*` for the top field: `WebPGetDecoderVersion -> bits *.8.8`
   reads 0x10600 as 1.6.0, and `BrotliDecoderVersion -> bits *.12.12` reads
   0x1002000 as 1.2.0.
+  It can end with `from`, as `decimal` does: before libwebp 1.0.0,
+  `WebPGetDemuxVersion` and `WebPGetMuxVersion` returned the demux and
+  mux libraries' own versions (0.3.3 and 0.4.1 in libwebp 0.6.1), so
+  their rows end with `from 65536`, which is 1.0.0.
 - `decimal` and the fields' widths in decimal digits, the same way, then
   `from` and the smallest value the encoding holds for. A smaller value
   gives nothing: `PQlibVersion -> decimal *.4 from 100000` reads 170011 as
@@ -304,9 +308,13 @@ Rules for these rows:
   at the release the binary gives.
 - Before a row is added, its encoding is checked by hand against the
   library's version macros at every release tag, and the check is recorded
-  in the pull request. An encoding that gives two releases the same value
-  can't be used: lcms2's `cmsGetEncodedCMMversion` returns 2190 for both
-  2.19 and 2.19.1, so lcms2 has no such row.
+  in the pull request.
+  An encoding that gives two releases the same value can't tell them
+  apart: lcms2's `cmsGetEncodedCMMversion` returns 2190 for both 2.19
+  and 2.19.1, so lcms2 has no such row yet, and libavif's v0.3.1 tag
+  still says 0.3.0 in `avif.h`, so a libavif 0.3.1 build reads as 0.3.0.
+  Such readings are to be kept and marked for further investigation
+  (see "Ambiguous versions" under [Later](#later-tbd)).
 - The derivative rule for library strings applies: a row is added only
   after checking for derivatives that keep the function and change its
   result, as zlib-ng's `zlibVersion` returns `1.3.1.zlib-ng`.
@@ -433,6 +441,9 @@ Part 2:
    has such a recognizer, phase 08 reads the file from the wheel at phase
    02's path and decodes the function (see
    [Version function machine code](#version-function-machine-code)).
+   Each file it reads must match phase 04's sha256. A missing wheel or
+   member, a changed file or an ELF pyelftools can't parse makes the
+   package's line `error`, so rerunning phase 08 needs the wheel cache.
    Once phase 08 is finished, every run rewrites `fingerprint-report.md`
    in the episode from phases 05, 07 and 08, as it rewrites
    `library-map-todo.csv`: for each package, every `.libs/` file and each
@@ -808,7 +819,7 @@ again only rows.
   the library no recognizer, or its recognizers matched nothing. A prefix
   marked `skip` is listed as skipped. Signals and gaps are visible side by
   side, and no version is shown without its basis.
-- **4.6** Version function machine code, as described in
+- **4.6** ✓ Version function machine code, as described in
   [Version function machine code](#version-function-machine-code): the
   `version_function_machine_code` kind and its pattern forms in the loader,
   the decoder for its code shapes, phase 08 reading those functions from
@@ -818,11 +829,11 @@ again only rows.
   Pillow 12.3.0, psycopg2-binary 2.9.13 and pyzmq 27.2.0 give the versions
   their build scripts pin: libwebp 1.6.0, brotli 1.2.0, libavif 1.4.2,
   dav1d 1.5.3 (pinned by libavif 1.4.2), libpq 17.11 and libzmq 4.3.5.
-  **← current**
 
 ### 5. SBOM comparison
 
 - **5.1** Read PEP 770 SBOMs (CycloneDX JSON) into components.
+  **← current**
 - **5.2** Compare SBOM claims against fingerprint results: coverage and
   agreement statistics.
 
@@ -884,15 +895,16 @@ again only rows.
   1.7.6 at its 1.7.7 and 1.8.0 tags. The hand-written zlib detector (2.1)
   becomes map rows once they pass its fixtures (2.2), including telling
   zlib from zlib-ng.
-- **Upstreams outside GitHub.** Phase 06 skips seven libraries with
+- **Upstreams outside GitHub.** Phase 06 skips eight libraries with
   reason `not_github`: libtiff (gitlab.com), bzip2 (sourceware.org), aom
   (aomedia.googlesource.com), libwebp (chromium.googlesource.com),
-  FreeType (gitlab.freedesktop.org), OpenLDAP (git.openldap.org) and
-  PostgreSQL (git.postgresql.org). Adding them means checking each
-  **tags** pattern against the real repository (FreeType's `VER-{version}`
-  has never been checked), and deciding whether a project's official
-  GitHub mirror, where it has one, can stand in for its upstream. It has
-  to land before 6.3 for those libraries to get fixed versions.
+  FreeType (gitlab.freedesktop.org), OpenLDAP (git.openldap.org),
+  PostgreSQL (git.postgresql.org) and dav1d (code.videolan.org). Adding
+  them means checking each **tags** pattern against the real repository
+  (FreeType's `VER-{version}` has never been checked), and deciding
+  whether a project's official GitHub mirror, where it has one, can stand
+  in for its upstream. It has to land before 6.3 for those libraries to
+  get fixed versions.
 - **Time-to-patch.** How long wheels kept shipping an affected version.
   Needs every release of each affected package, with upload times per file
   (depth, where `scan` is breadth). The clock starts when a fixed library
@@ -926,6 +938,18 @@ again only rows.
   library-string pattern's literal text contains the library's name,
   ignoring case, which every other current pattern meets; or counting
   such patterns only as hints, like bare versions.
+- **Ambiguous versions.** Some version functions give two releases the
+  same value (see
+  [Version function machine code](#version-function-machine-code)).
+  Rather than leaving such a library without a recognizer, the reading
+  is kept and marked "further investigation required", with the
+  releases it could be. Known collisions are listed in a committed file:
+  the library, the version as read, and the other releases it may be.
+  A record whose version is listed carries those releases, the
+  fingerprint report notes them, and 7.1 checks a CVE against every
+  one, so an ambiguous reading can add a candidate but never hide one.
+  This would give lcms2 a row: Pillow 12.3.0 ships 2.19.1, which would
+  show as 2.19 or 2.19.1.
 
 ## Data handling and disclosure
 

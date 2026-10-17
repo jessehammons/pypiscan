@@ -4,7 +4,8 @@ Evidence kinds, record format and detector rules are specified in the README
 section "How versions are identified". Library-specific knowledge lives in
 ``pypiscan.detectors``; this module only scans and builds records. Scan
 phase 08 builds its records with ``record`` too, from matches it finds in
-phase 04's strings.
+phase 04's strings and, through ``pypiscan.version_function``, in version
+functions' machine code.
 """
 
 import hashlib
@@ -17,14 +18,30 @@ from typing import Literal, TypedDict
 from pypiscan.elf_sections import Sections, section_at, sections
 from pypiscan.wheel_inspect import iter_elf_members
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 Kind = Literal[
-    "library_string", "build_path", "bare_version", "header_string", "filename"
+    "library_string",
+    "build_path",
+    "version_function_machine_code",
+    "bare_version",
+    "header_string",
+    "filename",
 ]
-Basis = Literal["library_string", "build_path", "bare_version", "header_string"]
+Basis = Literal[
+    "library_string",
+    "build_path",
+    "version_function_machine_code",
+    "bare_version",
+    "header_string",
+]
 # The kinds that set a version, strongest first.
-VERSION_KINDS: tuple[Basis, ...] = ("library_string", "build_path", "bare_version")
+VERSION_KINDS: tuple[Basis, ...] = (
+    "library_string",
+    "build_path",
+    "version_function_machine_code",
+    "bare_version",
+)
 Relation = Literal["contains", "compiled_against"]
 
 
