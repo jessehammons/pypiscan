@@ -1,12 +1,15 @@
+import re
 from pathlib import Path
 
 import pytest
 
 from pypiscan.library_map import (
+    AMBIGUOUS_COLUMNS,
     COLUMNS,
     LibraryMapError,
     MapRow,
     VersionFunction,
+    load_ambiguous_versions,
     load_library_map,
     matcher,
     parse_version_function,
@@ -459,3 +462,71 @@ def test_version_function_shares_a_prefix(tmp_path: Path) -> None:
         ("dav1d", "version_function_machine_code"),
         ("yuv", ""),
     ]
+
+
+# The list of ambiguous versions (README "Ambiguous versions").
+AMBIGUOUS_HEADER = ",".join(AMBIGUOUS_COLUMNS)
+MAPPED = [
+    MapRow("liblcms2", "lcms2", "r", "v{version}", "", "", "", "", "", ""),
+    MapRow("libgfortran", "skip", "", "", "", "", "", "", "", ""),
+]
+
+
+def write_list(path: Path, *rows: str, header: str = AMBIGUOUS_HEADER) -> Path:
+    return write_map(path, *rows, header=header)
+
+
+def test_header_only_ambiguous_list_is_valid(tmp_path: Path) -> None:
+    assert load_ambiguous_versions(write_list(tmp_path / "a.csv"), MAPPED) == {}
+
+
+def test_ambiguous_list_keeps_each_version_and_its_releases(tmp_path: Path) -> None:
+    rows = ["lcms2,2.19.0,2.19.1", "", "lcms2,1.7.6,1.7.7", "lcms2,1.7.6,1.8.0"]
+    path = write_list(tmp_path / "a.csv", *rows)
+    assert load_ambiguous_versions(path, MAPPED) == {
+        "lcms2": {"2.19.0": ["2.19.1"], "1.7.6": ["1.7.7", "1.8.0"]}
+    }
+
+
+@pytest.mark.parametrize(
+    ("rows", "message"),
+    [
+        (["lcms2,2.19.0"], r":2: expected 3 fields, got 2"),
+        (["lcms2,2.19.0,2.19.1,x"], r":2: expected 3 fields, got 4"),
+        ([",2.19.0,2.19.1"], r":2: library is empty"),
+        (["lcms2,,2.19.1"], r":2: version is empty"),
+        (["lcms2,2.19.0,"], r":2: ambiguous_with is empty"),
+        (["zlib,1.3,1.3.1"], r":2: library 'zlib' isn't mapped"),
+        (["skip,1.3,1.3.1"], r":2: library 'skip' isn't mapped"),
+        (["lcms2,v2.19,2.19.1"], r":2: 'v2.19' isn't a version"),
+        (["lcms2,2.19.0,2.19 rc1"], r":2: '2.19 rc1' isn't a version"),
+        (["lcms2,2.19.0,2.19.0"], r":2: version and ambiguous_with are the same"),
+        (
+            ["lcms2,2.19.0,2.19.1", "lcms2,2.19.0,2.19.1"],
+            r":3: lcms2 2.19.0 2.19.1 is listed twice",
+        ),
+    ],
+)
+def test_ambiguous_list_rejects(tmp_path: Path, rows: list[str], message: str) -> None:
+    path = write_list(tmp_path / "a.csv", *rows)
+    with pytest.raises(LibraryMapError, match=rf"^{re.escape(str(path))}{message}"):
+        load_ambiguous_versions(path, MAPPED)
+
+
+@pytest.mark.parametrize(
+    "header", ["library,version", "library,version,ambiguous_with,note", "a,b,c"]
+)
+def test_ambiguous_list_rejects_missing_or_unknown_columns(
+    tmp_path: Path, header: str
+) -> None:
+    path = write_list(tmp_path / "a.csv", header=header)
+    with pytest.raises(LibraryMapError, match="header must be"):
+        load_ambiguous_versions(path, MAPPED)
+
+
+def test_committed_ambiguous_list_loads_against_committed_map() -> None:
+    data = Path(__file__).parent.parent / "data"
+    rows = load_library_map(data / "libraries.csv")
+    found = load_ambiguous_versions(data / "ambiguous_versions.csv", rows)
+    assert found["lcms2"]["2.19.0"] == ["2.19.1"]
+    assert found["libavif"]["0.3.0"] == ["0.3.1"]

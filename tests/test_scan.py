@@ -12,7 +12,12 @@ from git_repo import make_repo
 from pypiscan import scan as scan_module
 from pypiscan.cli import main
 from pypiscan.git import GitError, clone_or_fetch
-from pypiscan.library_map import COLUMNS, load_library_map, matcher
+from pypiscan.library_map import (
+    AMBIGUOUS_COLUMNS,
+    COLUMNS,
+    load_library_map,
+    matcher,
+)
 from pypiscan.package_list import Package
 from pypiscan.scan import (
     EPISODE_SCHEMA_VERSION,
@@ -57,6 +62,8 @@ class Dirs:
         )
         self.map = tmp_path / "libraries.csv"
         self.map.write_text(",".join(COLUMNS) + "\n")
+        self.ambiguous = tmp_path / "ambiguous_versions.csv"
+        self.ambiguous.write_text(",".join(AMBIGUOUS_COLUMNS) + "\n")
         self.episode = tmp_path / "episode"
         self.cache = tmp_path / "cache"
 
@@ -66,6 +73,8 @@ class Dirs:
             str(self.list),
             "--library-map",
             str(self.map),
+            "--ambiguous-versions",
+            str(self.ambiguous),
             "--episode-dir",
             str(self.episode),
             "--cache-dir",
@@ -330,6 +339,7 @@ def test_sigint_sets_the_stop_flag(tmp_path: Path, dirs: Dirs) -> None:
     status = scan(
         dirs.list,
         dirs.map,
+        dirs.ambiguous,
         dirs.episode,
         dirs.cache,
         3,
@@ -450,7 +460,14 @@ def test_phase_02_is_skipped_when_phase_01_skipped(dirs: Dirs) -> None:
     # it runs. puredemo never produces a WheelFile.
     err = io.StringIO()
     status = scan(
-        dirs.list, dirs.map, dirs.episode, dirs.cache, 2, RecordedClient(), err
+        dirs.list,
+        dirs.map,
+        dirs.ambiguous,
+        dirs.episode,
+        dirs.cache,
+        2,
+        RecordedClient(),
+        err,
     )
     assert status == 0
     [demo, pure] = dirs.lines("02-fetch")
@@ -1335,3 +1352,54 @@ def test_stop_during_part_2_leaves_no_phase_08(
     assert "interrupted after the last phase finished" in capsys.readouterr().err
     assert not list(dirs.episode.glob("08-*"))
     assert not (dirs.episode / "fingerprint-report.md").exists()
+
+
+# The list of ambiguous versions (roadmap 4.7).
+
+
+def test_missing_ambiguous_versions_prints_full_help(
+    dirs: Dirs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    argv = dirs.argv("--count", "1")
+    i = argv.index("--ambiguous-versions")
+    del argv[i : i + 2]
+    assert main(argv, client=RecordedClient()) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Required. List of ambiguous versions" in captured.err
+    assert "--episode-dir" in captured.err
+    assert not dirs.episode.exists()
+
+
+def test_bad_ambiguous_list_fails_preflight(
+    dirs: Dirs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dirs.ambiguous.write_text(",".join(AMBIGUOUS_COLUMNS) + "\nzlib,1.3,1.3.1\n")
+    assert run(dirs, "--count", "1") == 2
+    err = capsys.readouterr().err
+    assert f"{dirs.ambiguous}:2: library 'zlib' isn't mapped" in err
+    assert not dirs.episode.exists()
+
+
+def test_editing_the_ambiguous_list_rewrites_the_report(
+    dirs: Dirs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(scan_module, "phases", stub_phases)
+    monkeypatch.setattr(scan_module, "UPSTREAM_HOST", None)
+    repo = make_repo(dirs.episode.parent / "libpng", {"v1.6.58": {}})
+    png = f"libpng16,libpng,{repo},v{{version}},library_string,"
+    png += "libpng version {version},p.c,,,"
+    dirs.map.write_text(f"{','.join(COLUMNS)}\n{png}\nlibgfortran,skip,,,,,,,,\n")
+    assert run(dirs, "--count", "3") == 0
+    report = dirs.episode / "fingerprint-report.md"
+    row = "| libpng16-1a2b3c4d.so.16.58.0 | libpng | 1.6.58 | library_string |"
+    assert f"{row}  |" in report.read_text()
+    capsys.readouterr()
+
+    header = ",".join(AMBIGUOUS_COLUMNS)
+    dirs.ambiguous.write_text(f"{header}\nlibpng,1.6.58,1.6.59\n")
+    assert run(dirs, "--count", "3") == 0
+    err = capsys.readouterr().err
+    assert "08-fingerprint: already finished, skipped" in err
+    assert "pypiscan scan: error" not in err
+    assert f"{row} ambiguous: may also be 1.6.59 |" in report.read_text()

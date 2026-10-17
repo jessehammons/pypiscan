@@ -174,7 +174,7 @@ No .libs/ files.
 
 
 def test_report_covers_every_case() -> None:
-    assert report(PACKAGES, PHASE_05, PHASE_07, PHASE_08, ROWS) == EXPECTED
+    assert report(PACKAGES, PHASE_05, PHASE_07, PHASE_08, ROWS, {}) == EXPECTED
 
 
 def test_intro_is_verbatim() -> None:
@@ -187,7 +187,7 @@ def test_intro_is_verbatim() -> None:
 
 def test_error_line_shows_status_and_reason() -> None:
     error: Line = {"name": "c", "status": "error", "reason": "bad zip"}
-    text = report([Package("c", "3.0")], {}, {}, {"c": error}, [])
+    text = report([Package("c", "3.0")], {}, {}, {"c": error}, [], {})
     assert text == INTRO + "\n## c 3.0\n\nerror: bad zip\n"
 
 
@@ -196,3 +196,48 @@ def test_a_version_never_shows_without_its_basis() -> None:
         if line.startswith("| ") and not line.startswith("| file"):
             cells = [c.strip() for c in line.strip("|").split(" | ")]
             assert (cells[2] == "—") == (cells[3] == "—"), line
+
+
+AMBIGUOUS = {"lcms": {"2.19.0": ["2.19.1"]}, "hb": {"1.7.6": ["1.7.7", "1.8.0"]}}
+VF = "version_function_machine_code"
+
+
+def test_ambiguous_versions_are_noted() -> None:
+    rows = [
+        row("liblcms", "lcms", VF),
+        row("libhb", "hb", "bare_version"),
+        row("libnull", "lcms", VF),
+        row("libother", "other", VF),
+    ]
+    prefixes = ["liblcms", "libhb", "libnull", "libother"]
+    phase_05: dict[str, Line] = {
+        "a": {
+            "status": "ok",
+            "libraries": [{"path": path(p), "prefix": p} for p in prefixes],
+        }
+    }
+    phase_07: dict[str, Line] = {
+        "lcms": ok_07("lcms", "liblcms", "libnull"),
+        "hb": ok_07("hb", "libhb"),
+        "other": ok_07("other", "libother"),
+    }
+    records = [
+        record("liblcms", "lcms", "2.19.0", VF),
+        record("libhb", "hb", "1.7.6", "bare_version"),
+        # A null version is never ambiguous, nor another library's version.
+        record("libnull", "lcms", None, VF, conflict=True),
+        record("libother", "other", "2.19.0", VF),
+    ]
+    phase_08: dict[str, Line] = {
+        "a": {"status": "ok", "wheel": "a.whl", "records": records}
+    }
+    text = report([Package("a", "1.0")], phase_05, phase_07, phase_08, rows, AMBIGUOUS)
+    table = [line for line in text.splitlines() if line.startswith("| lib")]
+    assert table == [
+        f"| liblcms-1a2b3c4d.so.1 | lcms | 2.19.0 | {VF} | "
+        "ambiguous: may also be 2.19.1 |",
+        "| libhb-1a2b3c4d.so.1 | hb | 1.7.6 | bare_version | "
+        "needs another source; ambiguous: may also be 1.7.7 or 1.8.0 |",
+        "| libnull-1a2b3c4d.so.1 | lcms | — | — | matches disagree |",
+        f"| libother-1a2b3c4d.so.1 | other | 2.19.0 | {VF} |  |",
+    ]

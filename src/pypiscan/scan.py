@@ -29,9 +29,11 @@ from pypiscan.git import GitError, clone_or_fetch, tags
 from pypiscan.library_map import (
     SKIP,
     VERSION_FUNCTION,
+    Ambiguous,
     LibraryMapError,
     MapRow,
     VersionFunction,
+    load_ambiguous_versions,
     load_library_map,
     matcher,
     parse_version_function,
@@ -594,9 +596,15 @@ def _map_problems(episode: Path, library_map: Path) -> list[str]:
 
 
 def preflight(
-    package_list: Path, library_map: Path, episode: Path, cache: Path, count: int
-) -> tuple[list[Package], list[MapRow], int, list[str]]:
-    """Checks 1 to 5. Returns the packages, map rows, clamped count and problems."""
+    package_list: Path,
+    library_map: Path,
+    ambiguous_versions: Path,
+    episode: Path,
+    cache: Path,
+    count: int,
+) -> tuple[list[Package], list[MapRow], Ambiguous, int, list[str]]:
+    """Checks 1 to 5. Returns the packages, map rows, ambiguous versions,
+    clamped count and problems."""
     problems: list[str] = []
     for label, directory in (("episode", episode), ("cache", cache)):
         root = git_work_tree(directory)
@@ -606,19 +614,21 @@ def preflight(
                 f"at {root}; use a directory outside it"
             )
     rows: list[MapRow] = []
+    ambiguous: Ambiguous = {}
     try:
         rows = load_library_map(library_map)
         problems += _map_problems(episode, library_map)
+        ambiguous = load_ambiguous_versions(ambiguous_versions, rows)
     except LibraryMapError as exc:
         problems.append(str(exc))
     try:
         packages = load_package_list(package_list)
     except PackageListError as exc:
-        return [], rows, 0, [*problems, str(exc)]
+        return [], rows, ambiguous, 0, [*problems, str(exc)]
     count = min(count, len(packages))
     problems += _phase_file_problems(episode)
     problems += _episode_problems(episode, episode_inputs(package_list, count))
-    return packages[:count], rows, count, problems
+    return packages[:count], rows, ambiguous, count, problems
 
 
 def _read_lines(path: Path, key: str = "name") -> dict[str, Line]:
@@ -736,6 +746,7 @@ def write_fingerprint_report(
     packages: Sequence[Package],
     recognizers: Mapping[str, Line],
     rows: Sequence[MapRow],
+    ambiguous: Ambiguous,
 ) -> None:
     """Rewrite fingerprint-report.md from phases 05, 07 and 08."""
     text = fingerprint_report(
@@ -744,6 +755,7 @@ def write_fingerprint_report(
         recognizers,
         _read_lines(episode / "08-fingerprint.jsonl"),
         rows,
+        ambiguous,
     )
     (episode / "fingerprint-report.md").write_text(text, encoding="utf-8")
 
@@ -751,6 +763,7 @@ def write_fingerprint_report(
 def scan(
     package_list: Path,
     library_map: Path,
+    ambiguous_versions: Path,
     episode: Path,
     cache: Path,
     count: int,
@@ -759,8 +772,8 @@ def scan(
     stop: Stop | None = None,
 ) -> int:
     """Pre-flight, then create the directories, record episode.json and run."""
-    packages, rows, count, problems = preflight(
-        package_list, library_map, episode, cache, count
+    packages, rows, ambiguous, count, problems = preflight(
+        package_list, library_map, ambiguous_versions, episode, cache, count
     )
     for problem in problems:
         print(f"pypiscan scan: error: {problem}", file=err)
@@ -805,7 +818,7 @@ def scan(
         names = [phase.name for phase in part_1]
         status = run_phases(episode, packages, part_3, stop, err, finished=names)
         if (episode / "08-fingerprint.jsonl").is_file():
-            write_fingerprint_report(episode, packages, recognizers, rows)
+            write_fingerprint_report(episode, packages, recognizers, rows, ambiguous)
         return status
     finally:
         signal.signal(signal.SIGINT, handler)

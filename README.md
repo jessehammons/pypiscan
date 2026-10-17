@@ -87,6 +87,11 @@ another source must confirm the version before the finding is sent: the
 package's build scripts, an SBOM in the wheel, or a library string found
 by hand.
 
+An ambiguous version (see [Ambiguous versions](#ambiguous-versions))
+may be any of the releases that share it, so a finding that rests on
+one names them all, and which one shipped is confirmed before it is
+sent.
+
 ## Sources of truth
 
 - **The wheel's binaries** are what users actually run, and the primary
@@ -309,12 +314,9 @@ Rules for these rows:
 - Before a row is added, its encoding is checked by hand against the
   library's version macros at every release tag, and the check is recorded
   in the pull request.
-  An encoding that gives two releases the same value can't tell them
-  apart: lcms2's `cmsGetEncodedCMMversion` returns 2190 for both 2.19
-  and 2.19.1, so lcms2 has no such row yet, and libavif's v0.3.1 tag
-  still says 0.3.0 in `avif.h`, so a libavif 0.3.1 build reads as 0.3.0.
-  Such readings are to be kept and marked for further investigation
-  (see "Ambiguous versions" under [Later](#later-tbd)).
+  Values two releases share are listed as ambiguous (see
+  [Ambiguous versions](#ambiguous-versions)); pre-release tags, such
+  as `lcms2.19rc1`, aren't releases and aren't checked.
 - The derivative rule for library strings applies: a row is added only
   after checking for derivatives that keep the function and change its
   result, as zlib-ng's `zlibVersion` returns `1.3.1.zlib-ng`.
@@ -328,6 +330,31 @@ Rules for these rows:
   as `WebPGetDecoderVersion: 0x10600`, `avifVersion: "1.4.2"` or
   `zmq_version: 4, 3, 5`, and the file offset and section of the
   function's first byte.
+
+### Ambiguous versions
+
+A version is ambiguous when the library's own version macros give two
+releases the same value, so a binary from either reads the same.
+lcms2's `cmsGetEncodedCMMversion` returns 2190, read as 2.19.0, for
+both 2.19 and 2.19.1, and libavif's v0.3.1 tag still says 0.3.0 in
+`avif.h`. The every-tag check before a version function row is added
+finds them, and each is listed in `data/ambiguous_versions.csv`: the
+library, the version as its encoding spells it, and the other release
+it may be.
+
+| library | version | ambiguous_with |
+|---|---|---|
+| `lcms2` | `2.19.0` | `2.19.1` |
+| `libavif` | `0.3.0` | `0.3.1` |
+
+The list applies to a library's version whatever its basis, so a bare
+version that reads the same is marked too: marking too much costs a
+check by hand, and marking too little hides a candidate. Records keep
+the version as read. The fingerprint report notes
+`ambiguous: may also be 2.19.1`, and 7.1 checks a CVE against the
+version and every release it may be, so an ambiguous version can add
+a candidate but never hide one. The report reads the list on every
+run, so editing it needs no phase file deleted.
 
 ## How a scan runs
 
@@ -346,7 +373,7 @@ The same command runs both parts: a rerun skips finished phases, so after
 the map is edited, `scan` picks up at phase 06.
 
 ```
-pypiscan scan <package-list> --library-map M --episode-dir D --cache-dir C --count N
+pypiscan scan <package-list> --library-map M --ambiguous-versions A --episode-dir D --cache-dir C --count N
 ```
 
 - `--count` is required and takes the first N rows of the list: 1, 2, 5 or
@@ -357,6 +384,9 @@ pypiscan scan <package-list> --library-map M --episode-dir D --cache-dir C --cou
   length.
 - `--library-map` is required and names the committed library map,
   normally `data/libraries.csv`.
+- `--ambiguous-versions` is required and names the committed list of
+  ambiguous versions, normally `data/ambiguous_versions.csv` (see
+  [Ambiguous versions](#ambiguous-versions)).
 - The episode directory holds one run's results. The cache directory holds
   downloaded wheels and upstream clones, both shared between episodes. A
   wheel is stored as `wheels/<sha256>/<filename>`: a directory named by
@@ -447,8 +477,8 @@ Part 2:
    Once phase 08 is finished, every run rewrites `fingerprint-report.md`
    in the episode from phases 05, 07 and 08, as it rewrites
    `library-map-todo.csv`: for each package, every `.libs/` file and each
-   library its prefix maps to, with the version and its basis, or why
-   there is none (roadmap 4.5).
+   library its prefix maps to, with the version and its basis, marking an
+   ambiguous version, or why there is none (roadmap 4.5).
 9. `09-cves` (network, per library): candidate CVEs from NVD, by the map's
    CPE, and OSV, by its OSV identifier, checked against the curated CVE
    table (section 6). Fixed versions come from the release tags that
@@ -469,7 +499,7 @@ the package list. One row per prefix, library and way of identifying it:
 | `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | `build_path` | `{any}/openjpeg-{version}/{any}` | | | `uclouvain:openjpeg` | … |
 | `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | `bare_version` | `{version}` | `src/lib/openjp2/opj_config_private.h.cmake.in` | | `uclouvain:openjpeg` | … |
 | `libwebp` | `libwebp` | `https://chromium.googlesource.com/webm/libwebp` | `v{version}` | `version_function_machine_code` | `WebPGetDecoderVersion -> bits *.8.8` | `src/dec/vp8_dec.c` | | `webmproject:libwebp` | … |
-| `liblcms2` | `lcms2` | `https://github.com/mm2/Little-CMS` | `lcms{version}` | | | | | | |
+| `libfreetype` | `freetype` | `https://gitlab.freedesktop.org/freetype/freetype` | `VER-{version}` | | | | | | |
 | `libgfortran` | `skip` | | | | | | | | |
 
 - **prefix** is how a file is found, **library** is what it turns out to
@@ -514,8 +544,8 @@ the package list. One row per prefix, library and way of identifying it:
   library string; for a library that embeds none, use a build path,
   version function machine code or a bare version.
 - A row with a library and repo but no kind marks a library that is
-  identified but has no recognizer, such as lcms2 and FreeType, which
-  embed no version string and have no version function that can be read
+  identified but has no recognizer, such as FreeType, which embeds no
+  version string and has no version function that can be read
   (roadmap 4.4). Under one prefix, a library has either recognizer rows or
   one such row. Phase 08 has nothing to run for it, and 4.5 reports it.
 - **cpe** and **osv** may be empty until the CVE table (6.1) requires
@@ -536,8 +566,8 @@ Rules:
 - **Pre-flight finishes before anything is written.** Any failure is
   printed to stderr and exits 2:
   1. The episode and cache directories are outside any git working tree.
-  2. The package list loads (roadmap 3.2), and so does the library map
-     (roadmap 3.7).
+  2. The package list loads (roadmap 3.2), and so do the library map
+     (roadmap 3.7) and the list of ambiguous versions (roadmap 4.7).
   3. The episode's phase files are a run of finished phases with no gaps
      (01, 02, …) and no `.partial` file. Otherwise the error names every
      file to delete.
@@ -679,6 +709,7 @@ file and every later one. Smoke runs use the smoke list (3.2) with a small
 ```bash
 uv run python -m pypiscan scan data/smoke.csv \
   --library-map data/libraries.csv \
+  --ambiguous-versions data/ambiguous_versions.csv \
   --episode-dir ~/pypiscan/episodes/smoke-4 \
   --cache-dir ~/pypiscan/cache --count 4
 ```
@@ -829,6 +860,14 @@ again only rows.
   Pillow 12.3.0, psycopg2-binary 2.9.13 and pyzmq 27.2.0 give the versions
   their build scripts pin: libwebp 1.6.0, brotli 1.2.0, libavif 1.4.2,
   dav1d 1.5.3 (pinned by libavif 1.4.2), libpq 17.11 and libzmq 4.3.5.
+- **4.7** ✓ Ambiguous versions, as described in
+  [Ambiguous versions](#ambiguous-versions):
+  `data/ambiguous_versions.csv`, its loader and `--ambiguous-versions`,
+  and the fingerprint report's note. Version function rows for lcms2,
+  which the list makes usable, and for xz and harfbuzz, which rank
+  above their bare versions. Fingerprint records don't change. Manual
+  check: Pillow 12.3.0 gives lcms2 2.19.0, ambiguous with 2.19.1, and
+  xz 5.8.3 and harfbuzz 14.2.1 by version function machine code.
 
 ### 5. SBOM comparison
 
@@ -863,7 +902,8 @@ again only rows.
   write candidates with their evidence level into the episode, which is
   outside the repository. Each candidate shows the basis of its version,
   and one whose basis is `bare_version` is marked as needing another source
-  to confirm it.
+  to confirm it. One whose version is ambiguous is checked against every
+  release it may be.
 - **7.2** Evidence for levels 2 and 3: whether the affected function is
   present in the binary, and which extension modules import functions from
   the bundled library.
@@ -938,18 +978,13 @@ again only rows.
   library-string pattern's literal text contains the library's name,
   ignoring case, which every other current pattern meets; or counting
   such patterns only as hints, like bare versions.
-- **Ambiguous versions.** Some version functions give two releases the
-  same value (see
-  [Version function machine code](#version-function-machine-code)).
-  Rather than leaving such a library without a recognizer, the reading
-  is kept and marked "further investigation required", with the
-  releases it could be. Known collisions are listed in a committed file:
-  the library, the version as read, and the other releases it may be.
-  A record whose version is listed carries those releases, the
-  fingerprint report notes them, and 7.1 checks a CVE against every
-  one, so an ambiguous reading can add a candidate but never hide one.
-  This would give lcms2 a row: Pillow 12.3.0 ships 2.19.1, which would
-  show as 2.19 or 2.19.1.
+- **Tags that aren't releases.** Phase 06 lists every tag its
+  **tags** pattern matches, so pre-release tags are listed as
+  versions (`lcms2.19rc1` as 2.19rc1), and an odd tag name can give a
+  version that never existed: lcms2's 2.7 is tagged `lcms2-2.7`,
+  which `lcms{version}` lists as 2.2.7. The range verifier (6.3)
+  reads these lists, so before it relies on them, each library's list
+  needs checking against its real releases.
 
 ## Data handling and disclosure
 

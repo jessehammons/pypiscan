@@ -1,0 +1,6 @@
+library,version,ambiguous_with
+lcms2,2.10.0,2.11
+lcms2,2.19.0,2.19.1
+libavif,0.3.0,0.3.1
+harfbuzz,1.7.6,1.7.7
+harfbuzz,1.7.6,1.8.0

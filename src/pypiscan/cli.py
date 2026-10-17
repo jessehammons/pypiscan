@@ -91,6 +91,13 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
         required=True,
         help="Library map CSV file, normally data/libraries.csv.",
     )
+    # Required, but checked after parsing, like --count.
+    p_scan.add_argument(
+        "--ambiguous-versions",
+        type=Path,
+        help="Required. List of ambiguous versions, normally "
+        "data/ambiguous_versions.csv.",
+    )
     p_scan.add_argument(
         "--episode-dir", type=Path, required=True, help="Directory for this run."
     )
@@ -106,7 +113,7 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
     )
     args = parser.parse_args(argv)
     if args.command == "scan":
-        if args.count is None:
+        if args.count is None or args.ambiguous_versions is None:
             p_scan.print_help(sys.stderr)
             return EXIT_PREFLIGHT
         if args.count < 1:
@@ -114,6 +121,7 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
         return scan(
             args.package_list,
             args.library_map,
+            args.ambiguous_versions,
             args.episode_dir,
             args.cache_dir,
             args.count,
