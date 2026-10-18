@@ -9,9 +9,11 @@ compiles with ``matcher``, or ``parse_version_function`` for a
 ``version_function_machine_code`` row, and every kind but ``build_path``
 cites an ``identity_file``. A row with no kind marks a library that is
 identified but has no recognizer yet. A ``bare_version`` row's prefix maps
-to no other library. ``cpe`` and ``osv`` may be empty
-until the CVE table (roadmap 6.1) requires them. ``load_ambiguous_versions``
-reads the list of ambiguous versions against the map's rows.
+to no other library. ``cpe``, when set, is the vendor and product of the
+library's CPE names in NVD, joined by ``:``; a library in the CVE table
+(``cve_table``) needs one. ``osv`` isn't used in version 1.
+``load_ambiguous_versions`` reads the list of ambiguous versions against the
+map's rows.
 """
 
 import csv
@@ -47,6 +49,8 @@ BARE_VERSION = r"\d+(?:\.\d+){2,}"
 TAG_VERSION = r"\d[0-9A-Za-z._+~-]*"
 C_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 NUMBER = re.compile(r"\d+")
+# A CPE's vendor and product, joined by ":".
+CPE = re.compile(r"[a-z0-9_.+~-]+:[a-z0-9_.+~-]+")
 
 
 class LibraryMapError(Exception):
@@ -194,6 +198,11 @@ def _row_problem(row: dict[str, str]) -> str | None:
         return f"{', '.join(missing)} is empty"
     if row["identity"]:
         return "identity is empty in version 1"
+    if row["cpe"] and not CPE.fullmatch(row["cpe"]):
+        return (
+            f"cpe {row['cpe']!r} isn't a vendor and product joined by ':', each "
+            "in lowercase letters, digits, _, ., -, + and ~"
+        )
     try:
         # A typo here would make phase 06 match no tags.
         _split("tags", row["tags"], {"version"})

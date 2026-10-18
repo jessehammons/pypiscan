@@ -1208,7 +1208,7 @@ again only rows.
 
 ### 6. CVE data
 
-- **6.1** CVE table format, loader and validation, as described in
+- **6.1** ✓ CVE table format, loader and validation, as described in
   [The CVE table](#the-cve-table): `data/cves.toml`, its loader, and
   `--cve-table`, which pre-flight loads. Each row stores evidence, not
   just conclusions: the commits of each fix with the first release tag
@@ -1220,9 +1220,9 @@ again only rows.
   for libwebp. Manual check: a full episode rerun from phase 06 after
   the map change writes the same reports as before, and a table whose
   fix tag libwebp's **tags** doesn't match stops pre-flight.
-  **← current**
 - **6.2** Phase 10's importer: draft candidate rows for each library from
   NVD, by CPE. Requires **cpe** on every mapped row.
+  **← current**
 - **6.3** Range verifier: given phase 06's clone and a row's fixes and
   introducing commit, compute the release tags that contain them and
   their dates; compare against the table's tags and dates and NVD's

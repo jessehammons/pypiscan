@@ -105,6 +105,31 @@ def test_rejects_wrong_columns(tmp_path: Path, header: str, message: str) -> Non
         load_library_map(write_map(tmp_path / "m.csv", header=header))
 
 
+@pytest.mark.parametrize("cpe", ["webmproject:libwebp", "a_b.c+d~e-0:x"])
+def test_accepts_a_cpe_vendor_and_product(tmp_path: Path, cpe: str) -> None:
+    path = write_map(tmp_path / "m.csv", f"libz,zlib,r,v{{version}},,,,,{cpe},")
+    assert [row.cpe for row in load_library_map(path)] == [cpe]
+
+
+@pytest.mark.parametrize(
+    "cpe",
+    [
+        "libwebp",
+        "WebMProject:libwebp",
+        ":libwebp",
+        "webmproject:",
+        "webmproject:libwebp:1.3.2",
+        "cpe:2.3:a:webmproject:libwebp",
+        "webm project:libwebp",
+        "webmproject::libwebp",
+    ],
+)
+def test_rejects_a_cpe_of_the_wrong_shape(tmp_path: Path, cpe: str) -> None:
+    path = write_map(tmp_path / "m.csv", f"libz,zlib,r,v{{version}},,,,,{cpe},")
+    with pytest.raises(LibraryMapError, match=f"{path}:2: cpe '{re.escape(cpe)}'"):
+        load_library_map(path)
+
+
 @pytest.mark.parametrize(
     ("row", "message"),
     [

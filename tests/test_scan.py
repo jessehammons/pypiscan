@@ -65,6 +65,8 @@ class Dirs:
         self.map.write_text(",".join(COLUMNS) + "\n")
         self.ambiguous = tmp_path / "ambiguous_versions.csv"
         self.ambiguous.write_text(",".join(AMBIGUOUS_COLUMNS) + "\n")
+        self.cves = tmp_path / "cves.toml"
+        self.cves.write_text("")
         self.episode = tmp_path / "episode"
         self.cache = tmp_path / "cache"
 
@@ -76,6 +78,8 @@ class Dirs:
             str(self.map),
             "--ambiguous-versions",
             str(self.ambiguous),
+            "--cve-table",
+            str(self.cves),
             "--episode-dir",
             str(self.episode),
             "--cache-dir",
@@ -343,6 +347,7 @@ def test_sigint_sets_the_stop_flag(tmp_path: Path, dirs: Dirs) -> None:
         dirs.list,
         dirs.map,
         dirs.ambiguous,
+        dirs.cves,
         dirs.episode,
         dirs.cache,
         3,
@@ -466,6 +471,7 @@ def test_phase_02_is_skipped_when_phase_01_skipped(dirs: Dirs) -> None:
         dirs.list,
         dirs.map,
         dirs.ambiguous,
+        dirs.cves,
         dirs.episode,
         dirs.cache,
         2,
@@ -1570,3 +1576,56 @@ def test_sbom_report_is_rewritten_once_phase_09_is_finished(
     assert run(dirs, "--count", "3") == 0
     assert report.read_text() == text
     assert (dirs.episode / "fingerprint-report.md").read_bytes() == fingerprints
+
+
+# The CVE table (roadmap 6.1).
+
+
+def test_missing_cve_table_prints_full_help(
+    dirs: Dirs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    argv = dirs.argv("--count", "1")
+    i = argv.index("--cve-table")
+    del argv[i : i + 2]
+    assert main(argv, client=RecordedClient()) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Required. CVE table, normally data/cves.toml." in captured.err
+    assert "--episode-dir" in captured.err
+    assert not dirs.episode.exists()
+
+
+def test_bad_cve_table_fails_preflight(
+    dirs: Dirs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The test map tracks no library, so no CVE can name one.
+    dirs.cves.write_text('[[cve]]\nid = "CVE-2023-4863"\nlibrary = "libwebp"\n')
+    assert run(dirs, "--count", "1") == 2
+    err = capsys.readouterr().err
+    assert f"{dirs.cves}: CVE-2023-4863 libwebp: published: missing" in err
+    assert not dirs.episode.exists()
+    dirs.cves.write_text("[[cve]\n")
+    assert run(dirs, "--count", "1") == 2
+    assert f"pypiscan scan: error: {dirs.cves}: " in capsys.readouterr().err
+    assert not dirs.episode.exists()
+
+
+def test_cve_table_is_checked_against_the_map(
+    dirs: Dirs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    table = (Path(__file__).parent.parent / "data" / "cves.toml").read_text()
+    dirs.cves.write_text(table)
+    assert run(dirs, "--count", "1") == 2
+    assert "library: 'libwebp' isn't a library the map tracks" in (
+        capsys.readouterr().err
+    )
+    webp = "libwebp,libwebp,https://chromium.googlesource.com/webm/libwebp,v{version}"
+    dirs.map.write_text(f"{','.join(COLUMNS)}\n{webp},,,,,,\n")
+    assert run(dirs, "--count", "1") == 2
+    assert "library: 'libwebp' has no cpe in the library map" in (
+        capsys.readouterr().err
+    )
+    dirs.map.write_text(f"{','.join(COLUMNS)}\n{webp},,,,,webmproject:libwebp,\n")
+    assert run(dirs, "--count", "1") == 0
+    # The table isn't an episode input, so editing it needs no file deleted.
+    assert "cve" not in (dirs.episode / "episode.json").read_text()
