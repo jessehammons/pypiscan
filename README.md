@@ -38,8 +38,8 @@ In scope:
   sqlite. The order of additions is set by how often each library appears in
   the scanned wheels (roadmap item 3.7), and a library is added as rows in
   the [library map](#the-library-map).
-- A curated CVE table covering high and critical CVEs from 2020 onward for
-  those libraries.
+- A curated [CVE table](#the-cve-table) covering high and critical CVEs
+  from 2020 onward for those libraries, found through NVD.
 
 Out of scope for version 1, and listed under [Later](#later-tbd):
 statically linked libraries, and time-to-patch (how long wheels kept
@@ -106,11 +106,14 @@ sent.
   are compared with the binaries (roadmap 5.2) and never change what
   the binaries show.
 - **The upstream library's git history** is the ground truth for a CVE's
-  fixed version: the first release whose tag contains the fix commit. The CVE
-  table stores the fix commits, so every range can be recomputed.
-- **NVD, OSV and the GitHub Advisory Database** are used to find candidate
-  CVEs and fix commits, and as cross-checks. Their version ranges for C
-  libraries are often wrong and are never used unverified.
+  fixed versions: a release is fixed when its tag contains a fix's
+  commits, and a backport is a commit of its own (see
+  [The CVE table](#the-cve-table)). The CVE table stores the fix commits,
+  so every range can be recomputed.
+- **NVD** is used to find candidate CVEs, their severity and links to
+  their fix commits. Version 1 uses no other advisory source (see
+  "Other advisory sources" under [Later](#later-tbd)). NVD's version
+  ranges for C libraries are often wrong and are never used unverified.
 
 ## How versions are identified
 
@@ -536,7 +539,8 @@ The same command runs both parts: a rerun skips finished phases, so after
 the map is edited, `scan` picks up at phase 06.
 
 ```
-pypiscan scan <package-list> --library-map M --ambiguous-versions A --episode-dir D --cache-dir C --count N
+pypiscan scan <package-list> --library-map M --ambiguous-versions A \
+  --cve-table T --episode-dir D --cache-dir C --count N
 ```
 
 - `--count` is required and takes the first N rows of the list: 1, 2, 5 or
@@ -550,6 +554,8 @@ pypiscan scan <package-list> --library-map M --ambiguous-versions A --episode-di
 - `--ambiguous-versions` is required and names the committed list of
   ambiguous versions, normally `data/ambiguous_versions.csv` (see
   [Ambiguous versions](#ambiguous-versions)).
+- `--cve-table` is required and names the committed CVE table, normally
+  `data/cves.toml` (see [The CVE table](#the-cve-table)).
 - The episode directory holds one run's results. The cache directory holds
   downloaded wheels and upstream clones, both shared between episodes. A
   wheel is stored as `wheels/<sha256>/<filename>`: a directory named by
@@ -654,9 +660,9 @@ Part 2:
    episode (see
    [Comparing SBOMs with fingerprints](#comparing-sboms-with-fingerprints)).
 10. `10-cves` (network, per library): candidate CVEs from NVD, by the map's
-    CPE, and OSV, by its OSV identifier, checked against the curated CVE
-    table (section 6). Fixed versions come from the release tags that
-    contain each fix commit, in phase 06's clone.
+    CPE, checked against the CVE table (see
+    [The CVE table](#the-cve-table)). Fixed versions come from the release
+    tags that contain each fix's commits, in phase 06's clone.
 11. `11-match` (per package): each library version that falls inside a
     CVE's affected range, with its evidence level. A match is a candidate
     for investigation, not a finding.
@@ -722,8 +728,12 @@ the package list. One row per prefix, library and way of identifying it:
   version string and has no version function that can be read
   (roadmap 4.4). Under one prefix, a library has either recognizer rows or
   one such row. Phase 08 has nothing to run for it, and 4.5 reports it.
-- **cpe** and **osv** may be empty until the CVE table (6.1) requires
-  them.
+- **cpe** is the vendor and product of the library's CPE names in NVD,
+  joined by `:`, such as `webmproject:libwebp`, each in lowercase
+  letters, digits, `_`, `.`, `-`, `+` and `~`. A library in the CVE
+  table needs one, and 6.2 requires it on every mapped row. **osv**
+  isn't used in version 1 (see "Other advisory sources" under
+  [Later](#later-tbd)).
 - `skip` marks a prefix the maintainer has looked at and isn't tracking,
   so it doesn't come back as a TODO. A `skip` row has every column empty
   except **prefix** and **library**.
@@ -741,7 +751,8 @@ Rules:
   printed to stderr and exits 2:
   1. The episode and cache directories are outside any git working tree.
   2. The package list loads (roadmap 3.2), and so do the library map
-     (roadmap 3.7) and the list of ambiguous versions (roadmap 4.7).
+     (roadmap 3.7), the list of ambiguous versions (roadmap 4.7) and the
+     CVE table (roadmap 6.1).
   3. The episode's phase files are a run of finished phases with no gaps
      (01, 02, …) and no `.partial` file. Otherwise the error names every
      file to delete.
@@ -795,6 +806,141 @@ Rules:
 - When every phase finishes, `scan` exits 0, even if some lines are
   `error`: errors are data. It exits 3 when it stops for the manual step.
   Counts by status go to stderr, and nothing goes to stdout.
+
+## The CVE table
+
+`data/cves.toml` is curated input, edited by hand and committed like the
+library map. It lists high and critical CVEs in the libraries the map
+tracks, and it is about libraries and their releases, never wheels or
+packages: matches against wheels are written only into the episode
+(roadmap 7.1; see
+[Data handling and disclosure](#data-handling-and-disclosure)).
+
+Version 1 finds CVEs through NVD alone (see "Other advisory sources"
+under [Later](#later-tbd)). A CVE is in scope when NVD published it on
+or after 2020-01-01 and any CVSS v3.0, v3.1 or v4.0 score on its NVD
+record, NVD's own or another source's, is `HIGH` or `CRITICAL`. Every
+score is recorded, and one is enough: listing too much costs a check by
+hand, and listing too little hides a candidate. Severities that aren't
+CVSS scores, such as Chromium's, aren't used.
+
+The table is TOML, read with Python's `tomllib`: a CVE can have several
+fixes, each with its own commits, which a CSV row can't hold, and with
+one value per line a diff shows what changed. Each CVE and library is
+one `[[cve]]` table. The seed, abridged:
+
+```toml
+[[cve]]
+id = "CVE-2023-4863"
+library = "libwebp"
+published = 2023-09-12
+component = "library"
+introduced = "unknown"
+duplicates = ["CVE-2023-5129"]
+sources = [
+  "https://nvd.nist.gov/vuln/detail/CVE-2023-4863",
+  "https://chromium.googlesource.com/webm/libwebp/+/refs/tags/v1.3.2/NEWS",
+]
+
+[[cve.severity]]
+source = "nvd@nist.gov"
+cvss = "3.1"
+score = 8.8
+label = "HIGH"
+
+[[cve.fix]]
+commits = ["2af26267cdfcb63a88e5c74a85927a12d6ca1d76"]
+tag = "v1.3.2"
+date = 2023-09-13
+
+[[cve.fix]]
+commits = ["902bc9190331343b2017211debcec8d2ab87e17a"]
+tag = "v1.4.0"
+date = 2024-04-12
+```
+
+- **id**: `CVE-`, the year, `-` and four or more digits. A CVE is listed
+  once for each library it affects, so **id** and **library** together
+  are unique.
+- **library**: a library the map tracks, not `skip`, whose rows have a
+  **cpe**.
+- **published**: the day NVD published the CVE, in UTC, from 2020-01-01
+  on.
+- **component**: `library` when the bug is in the library's own code, or
+  `tool` when it is in a program the project ships beside it, with
+  **tool** naming the program. A `.libs/` file holds the library, not
+  its tools, so 7.1 lists a `tool` CVE without matching it.
+- **introduced**: the commit that introduced the bug, or `unknown`,
+  which counts every release without a fix as affected.
+- **duplicates**: optional. Rejected CVE IDs that NVD calls duplicates of
+  this one, such as CVE-2023-5129, so an advisory that names one is tied
+  to this row rather than becoming a second row.
+- **disputed**: only for a disputed CVE, a table with **reason**, who
+  disputes it and why, and **source**, a link to the dispute. A disputed
+  CVE stays in the table, marked.
+- **sources**: links to what the row rests on, among them the CVE's NVD
+  page.
+- **severity**: each CVSS score on the NVD record: its **source** as NVD
+  names it (`nvd@nist.gov` for NVD's own), the CVSS version, the base
+  score and its label.
+- **fix**: one for each line of releases the fix reached, such as a
+  maintained branch: the **commits** a release must contain to be fixed
+  (a backport has its own hashes), the first release **tag** that
+  contains them all, and that tag's **date**. A row with no fix has no
+  fixed release yet.
+
+The upstream git history is the ground truth: a release is fixed when its
+tag contains every commit of one of the row's fixes. CVE-2023-4863 shows
+why each line of releases is listed. NVD links libwebp's fix on its main
+branch, 902bc91, which no release before 1.4.0 contains; 1.3.2 was fixed
+by a backport, 2af2626. A row with only NVD's commit would call 1.3.2
+affected. A backport no release tag contains, such as those on libwebp's
+older branches, isn't listed.
+
+A fix's tag and date say which release first carried it, a claim the
+range verifier (6.3) checks with `git tag --contains` in phase 06's
+clone. A tag's date is the day `git for-each-ref` gives as
+`%(creatordate:short)`: its tagger date, or its commit's date for a
+lightweight tag, in that date's own time zone.
+
+7.1 doesn't order versions. It tests a version by the release tag phase
+06 lists for it: the release is affected when its tag contains none of
+the row's fixes, unless the row names an introducing commit the tag
+doesn't contain. A version phase 06 lists no tag for, such as OpenBLAS's
+`0.3.31.dev`, and every version of a library phase 06 couldn't clone
+(see "Upstreams outside GitHub" under [Later](#later-tbd)) are listed as
+not compared, never as fixed. An ambiguous version is tested as every
+release it may be.
+
+Pre-flight loads the table against the library map. The loader rejects,
+naming the CVE, its library and the field:
+
+- a file that isn't TOML, a key it doesn't know at any level, a value of
+  the wrong type, or an empty string;
+- an **id** or duplicate of the wrong shape, an **id** and **library**
+  listed twice, or a duplicate that is also a row's **id**, appears twice
+  in one row or is listed for two different CVEs (a CVE in two libraries
+  lists its duplicates in both rows);
+- a library the map doesn't track, or one with no **cpe**;
+- a **published** day before 2020-01-01;
+- a **component** other than `library` or `tool`, a `tool` without
+  **tool**, or **tool** on a `library` row;
+- an **introduced** that is neither `unknown` nor a commit;
+- a **disputed** table without both **reason** and **source**, or whose
+  **source** doesn't start with `https://`;
+- no **sources**, no NVD page for the CVE among them, a link that
+  doesn't start with `https://`, or one listed twice;
+- no score labeled `HIGH` or `CRITICAL`; a CVSS version other than
+  `3.0`, `3.1` or `4.0`; a label that doesn't fit its score (`NONE` for
+  0.0, `LOW` from 0.1 to 3.9, `MEDIUM` from 4.0 to 6.9, `HIGH` from 7.0
+  to 8.9, `CRITICAL` from 9.0 to 10.0);
+- a fix with no commits, a commit that isn't 40 lowercase hex digits or
+  appears twice in the row, counting the introducing commit, or a **tag**
+  the library's **tags** doesn't match.
+
+A commit is 40 lowercase hex digits. Whether a fix's tag exists and
+contains its commits isn't checked at load time, since tags come from
+phase 06's clone: the range verifier (6.3) checks them.
 
 ## Roadmap
 
@@ -885,6 +1031,7 @@ file and every later one. Smoke runs use the smoke list (3.2) with a small
 uv run python -m pypiscan scan data/smoke.csv \
   --library-map data/libraries.csv \
   --ambiguous-versions data/ambiguous_versions.csv \
+  --cve-table data/cves.toml \
   --episode-dir ~/pypiscan/episodes/smoke-4 \
   --cache-dir ~/pypiscan/cache --count 4
 ```
@@ -1065,19 +1212,26 @@ again only rows.
 
 ### 6. CVE data
 
-- **6.1** CVE table format, loader and validation. Each row stores evidence,
-  not just conclusions: fix commits, fixed version and release date per
-  maintained branch, introduced version (or "unknown"), affected component
-  (library code or a bundled tool), disputed status and sources. Seeded with
-  CVE-2023-4863. Requires `cpe` and `osv` on the library map's mapped
-  rows.
-  **← current**
+- **6.1** ✓ CVE table format, loader and validation, as described in
+  [The CVE table](#the-cve-table): `data/cves.toml`, its loader, and
+  `--cve-table`, which pre-flight loads. Each row stores evidence, not
+  just conclusions: the commits of each fix with the first release tag
+  containing them and its date, the introducing commit (or `unknown`),
+  the affected component (library code or a bundled tool), disputed
+  status, NVD's CVSS scores and sources. Seeded with CVE-2023-4863,
+  whose fixes are checked by hand in libwebp's upstream repository. The
+  map's **cpe** is required for a library in the table, and filled in
+  for libwebp. Manual check: a full episode rerun from phase 06 after
+  the map change writes the same reports as before, and a table whose
+  fix tag libwebp's **tags** doesn't match stops pre-flight.
 - **6.2** Phase 10's importer: draft candidate rows for each library from
-  NVD, by CPE, and OSV, by OSV identifier.
-- **6.3** Range verifier: given phase 06's clone and a row's fix commits,
-  compute the release tags that contain them and their dates; compare
-  against the imported ranges and flag disagreements. Tests use a small
-  synthetic git repository.
+  NVD, by CPE. Requires **cpe** on every mapped row.
+  **← current**
+- **6.3** Range verifier: given phase 06's clone and a row's fixes and
+  introducing commit, compute the release tags that contain them and
+  their dates; compare against the table's tags and dates and NVD's
+  ranges, and flag disagreements. Tests use a small synthetic git
+  repository.
 - **6.4** *(maintainer input)* Curation review: resolve flagged rows, one
   library per pull request. Corrections to public advisories are submitted
   upstream. A bug in an original library can also be in a fork's code
@@ -1091,7 +1245,8 @@ again only rows.
   outside the repository. Each candidate shows the basis of its version,
   and one whose basis is `bare_version` is marked as needing another source
   to confirm it. One whose version is ambiguous is checked against every
-  release it may be.
+  release it may be. Versions are tested by their release tags, as
+  described in [The CVE table](#the-cve-table).
 - **7.2** Evidence for levels 2 and 3: whether the affected function is
   present in the binary, and which extension modules import functions from
   the bundled library.
@@ -1136,8 +1291,9 @@ again only rows.
   them means checking each **tags** pattern against the real repository
   (FreeType's `VER-{version}` has never been checked), and deciding
   whether a project's official GitHub mirror, where it has one, can stand
-  in for its upstream. It has to land before 6.3 for those libraries to
-  get fixed versions.
+  in for its upstream. It has to land before 6.3 and 7.1 for those
+  libraries, libwebp among them: until it does, they get no fixed
+  versions, and 7.1 doesn't compare their versions.
 - **Time-to-patch.** How long wheels kept shipping an affected version.
   Needs every release of each affected package, with upload times per file
   (depth, where `scan` is breadth). The clock starts when a fixed library
@@ -1232,6 +1388,21 @@ again only rows.
   that are already the answer key, so it adds no independent source.
   Rust extensions' SBOMs name crates compiled in statically, which
   waits for "Statically linked libraries".
+- **Other advisory sources.** Version 1 finds CVEs through NVD alone, by
+  each library's CPE. Since April 15, 2026, NVD enriches first the CVEs
+  in CISA's KEV catalog, in software the federal government uses, or in
+  critical software, and marks the rest lowest priority, not scheduled
+  for immediate enrichment; its unenriched backlog from before March 1,
+  2026 is not scheduled either. Enrichment adds severity scores and
+  product lists, and a query by CPE finds a CVE only through its product
+  list, so a CVE NVD hasn't enriched is missed. NVD also no longer
+  routinely scores a CVE its CNA has scored; the scope rule's "any score"
+  covers that.
+  OSV gives git ranges for C libraries, but its record for CVE-2023-4863
+  derives them from the same CPE range and patch link NVD has, so there
+  it isn't an independent source; it may list CVEs NVD hasn't matched.
+  The library map keeps an **osv** column for it. Adding a source means
+  deciding how its CVEs, severities and fixes combine with NVD's.
 
 ## Data handling and disclosure
 
