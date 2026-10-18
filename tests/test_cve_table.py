@@ -230,6 +230,17 @@ REJECTED = [
         edit('["CVE-2023-5129"]', '["5129"]'),
         f"{HEAD}: duplicates[0]: '5129' isn't a CVE ID",
     ),
+    # Only ASCII digits: \d would match fullwidth ones too.
+    (
+        edit('id = "CVE-2023-4863"', 'id = "CVE-\uff12\uff10\uff12\uff13-4863"'),
+        "CVE-\uff12\uff10\uff12\uff13-4863 libwebp: id: "
+        "'CVE-\uff12\uff10\uff12\uff13-4863' isn't CVE-, a year, - and 4 or more "
+        "digits",
+    ),
+    (
+        edit('["CVE-2023-5129"]', '["CVE-\uff12\uff10\uff12\uff13-5129"]'),
+        f"{HEAD}: duplicates[0]: 'CVE-\uff12\uff10\uff12\uff13-5129' isn't a CVE ID",
+    ),
     # A library the map doesn't track, or one with no cpe.
     (
         edit('library = "libwebp"', 'library = "zlib"'),
@@ -288,6 +299,13 @@ REJECTED = [
     (
         after('introduced = "unknown"', 'disputed = { source = "https://x" }'),
         f"{HEAD}: disputed.reason: missing",
+    ),
+    (
+        after(
+            'introduced = "unknown"',
+            'disputed = { reason = "upstream", source = "http://x.org/d" }',
+        ),
+        f"{HEAD}: disputed.source: 'http://x.org/d' doesn't start with https://",
     ),
     # Sources.
     (

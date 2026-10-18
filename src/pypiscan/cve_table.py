@@ -19,7 +19,9 @@ from typing import cast
 
 from pypiscan.library_map import SKIP, MapRow, tag_matcher
 
-CVE_ID = re.compile(r"CVE-\d{4}-\d{4,}")
+# [0-9], not \d, which also matches other scripts' digits, such as
+# FULLWIDTH DIGIT TWO.
+CVE_ID = re.compile(r"CVE-[0-9]{4}-[0-9]{4,}")
 COMMIT = re.compile(r"[0-9a-f]{40}")
 UNKNOWN = "unknown"
 EARLIEST = date(2020, 1, 1)
@@ -228,10 +230,11 @@ def _fix(table: Table, where: str, tags: re.Pattern[str], spelled: str) -> Fix:
 def _dispute(value: object) -> Dispute:
     table = _table(value, "disputed")
     _keys(table, "disputed", DISPUTE_KEYS, ())
-    return Dispute(
-        _str(table["reason"], "disputed.reason"),
-        _str(table["source"], "disputed.source"),
-    )
+    reason = _str(table["reason"], "disputed.reason")
+    source = _str(table["source"], "disputed.source")
+    if not source.startswith("https://"):
+        raise _Problem("disputed.source", f"{source!r} doesn't start with https://")
+    return Dispute(reason, source)
 
 
 def _sources(value: object, cve_id: str) -> list[str]:

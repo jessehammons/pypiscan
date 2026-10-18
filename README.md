@@ -878,7 +878,8 @@ date = 2024-04-12
 - **disputed**: only for a disputed CVE, a table with **reason**, who
   disputes it and why, and **source**, a link to the dispute. A disputed
   CVE stays in the table, marked.
-- **sources**: links to what the row rests on, the CVE's NVD page first.
+- **sources**: links to what the row rests on, among them the CVE's NVD
+  page.
 - **severity**: each CVSS score on the NVD record: its **source** as NVD
   names it (`nvd@nist.gov` for NVD's own), the CVSS version, the base
   score and its label.
@@ -914,16 +915,19 @@ release it may be.
 Pre-flight loads the table against the library map. The loader rejects,
 naming the CVE, its library and the field:
 
-- a file that isn't TOML, a key it doesn't know at any level, or a value
-  of the wrong type;
-- an **id** of the wrong shape, an **id** and **library** listed twice,
-  or a duplicate that is also a row's **id** or is listed twice;
+- a file that isn't TOML, a key it doesn't know at any level, a value of
+  the wrong type, or an empty string;
+- an **id** or duplicate of the wrong shape, an **id** and **library**
+  listed twice, or a duplicate that is also a row's **id**, appears twice
+  in one row or is listed for two different CVEs (a CVE in two libraries
+  lists its duplicates in both rows);
 - a library the map doesn't track, or one with no **cpe**;
 - a **published** day before 2020-01-01;
 - a **component** other than `library` or `tool`, a `tool` without
   **tool**, or **tool** on a `library` row;
 - an **introduced** that is neither `unknown` nor a commit;
-- a **disputed** table without both **reason** and **source**;
+- a **disputed** table without both **reason** and **source**, or whose
+  **source** doesn't start with `https://`;
 - no **sources**, no NVD page for the CVE among them, a link that
   doesn't start with `https://`, or one listed twice;
 - no score labeled `HIGH` or `CRITICAL`; a CVSS version other than
@@ -931,8 +935,8 @@ naming the CVE, its library and the field:
   0.0, `LOW` from 0.1 to 3.9, `MEDIUM` from 4.0 to 6.9, `HIGH` from 7.0
   to 8.9, `CRITICAL` from 9.0 to 10.0);
 - a fix with no commits, a commit that isn't 40 lowercase hex digits or
-  appears twice in the row, or a **tag** the library's **tags** doesn't
-  match.
+  appears twice in the row, counting the introducing commit, or a **tag**
+  the library's **tags** doesn't match.
 
 A commit is 40 lowercase hex digits. Whether a fix's tag exists and
 contains its commits isn't checked at load time, since tags come from
@@ -1385,9 +1389,15 @@ again only rows.
   Rust extensions' SBOMs name crates compiled in statically, which
   waits for "Statically linked libraries".
 - **Other advisory sources.** Version 1 finds CVEs through NVD alone, by
-  each library's CPE. Since April 2026 NVD enriches only the CVEs it
-  prioritizes, adding CPE matches to them, and marks the rest Not
-  Scheduled, so a CVE NVD hasn't matched to a library's CPE is missed.
+  each library's CPE. Since April 15, 2026, NVD enriches first the CVEs
+  in CISA's KEV catalog, in software the federal government uses, or in
+  critical software, and marks the rest lowest priority, not scheduled
+  for immediate enrichment; its unenriched backlog from before March 1,
+  2026 is not scheduled either. Enrichment adds severity scores and
+  product lists, and a query by CPE finds a CVE only through its product
+  list, so a CVE NVD hasn't enriched is missed. NVD also no longer
+  routinely scores a CVE its CNA has scored; the scope rule's "any score"
+  covers that.
   OSV gives git ranges for C libraries, but its record for CVE-2023-4863
   derives them from the same CPE range and patch link NVD has, so there
   it isn't an independent source; it may list CVEs NVD hasn't matched.
