@@ -1303,7 +1303,7 @@ again only rows.
   for libwebp. Manual check: a full episode rerun from phase 06 after
   the map change writes the same reports as before, and a table whose
   fix tag libwebp's **tags** doesn't match stops pre-flight.
-- **6.2** Phase 10, candidate CVEs from NVD, as described in
+- **6.2** ✓ Phase 10, candidate CVEs from NVD, as described in
   [Candidates from NVD](#candidates-from-nvd): a query by each of a
   library's CPE names, and every candidate published from 2020-01-01
   on, with its scope, scores, ranges and patch links verbatim. **cpe**
@@ -1313,7 +1313,6 @@ again only rows.
   rerun from phase 06 after the map change writes the same reports as
   before; phase 10 lists CVE-2023-4863 for libwebp, `in` scope, with
   its Patch link, and gives geos and libsodium `skipped` lines.
-  **← current**
 - **6.3** Range verifier: given phase 06's clone and a row's fixes and
   introducing commit, compute the release tags that contain them and
   their dates; compare against the table's tags and dates and NVD's
@@ -1321,6 +1320,7 @@ again only rows.
   repository. A CVE report, rewritten every run from phase 10 and the
   table, shows each candidate and whether the table lists it, as a row
   or a **duplicates** entry, beside the verifier's flags.
+  **← current**
 - **6.4** *(maintainer input)* Curation review: resolve flagged rows, one
   library per pull request. Corrections to public advisories are submitted
   upstream. A bug in an original library can also be in a fork's code
