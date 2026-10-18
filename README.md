@@ -659,10 +659,11 @@ Part 2:
    Once phase 09 is finished, every run rewrites `sbom-report.md` in the
    episode (see
    [Comparing SBOMs with fingerprints](#comparing-sboms-with-fingerprints)).
-10. `10-cves` (network, per library): candidate CVEs from NVD, by the map's
-    CPE, checked against the CVE table (see
-    [The CVE table](#the-cve-table)). Fixed versions come from the release
-    tags that contain each fix's commits, in phase 06's clone.
+10. `10-cves` (network, per library): candidate CVEs from NVD, by each
+    of the library's CPE names (see
+    [Candidates from NVD](#candidates-from-nvd)). It reads neither the
+    CVE table nor phase 06's clone: candidates are drafts, and the range
+    verifier (6.3) checks the table's fixes in the clone.
 11. `11-match` (per package): each library version that falls inside a
     CVE's affected range, with its evidence level. A match is a candidate
     for investigation, not a finding.
@@ -679,7 +680,7 @@ the package list. One row per prefix, library and way of identifying it:
 | `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | `build_path` | `{any}/openjpeg-{version}/{any}` | | | `uclouvain:openjpeg` | … |
 | `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | `bare_version` | `{version}` | `src/lib/openjp2/opj_config_private.h.cmake.in` | | `uclouvain:openjpeg` | … |
 | `libwebp` | `libwebp` | `https://chromium.googlesource.com/webm/libwebp` | `v{version}` | `version_function_machine_code` | `WebPGetDecoderVersion -> bits *.8.8` | `src/dec/vp8_dec.c` | | `webmproject:libwebp` | … |
-| `libfreetype` | `freetype` | `https://gitlab.freedesktop.org/freetype/freetype` | `VER-{version}` | | | | | | |
+| `libfreetype` | `freetype` | `https://gitlab.freedesktop.org/freetype/freetype` | `VER-{version}` | | | | | `freetype:freetype` | |
 | `libgfortran` | `skip` | | | | | | | | |
 
 - **prefix** is how a file is found, **library** is what it turns out to
@@ -728,12 +729,18 @@ the package list. One row per prefix, library and way of identifying it:
   version string and has no version function that can be read
   (roadmap 4.4). Under one prefix, a library has either recognizer rows or
   one such row. Phase 08 has nothing to run for it, and 4.5 reports it.
-- **cpe** is the vendor and product of the library's CPE names in NVD,
-  joined by `:`, such as `webmproject:libwebp`, each in lowercase
-  letters, digits, `_`, `.`, `-`, `+` and `~`. A library in the CVE
-  table needs one, and 6.2 requires it on every mapped row. **osv**
-  isn't used in version 1 (see "Other advisory sources" under
-  [Later](#later-tbd)).
+- **cpe** is how NVD names the library: each vendor and product NVD
+  uses for the library's upstream project, joined by `:`, such as
+  `webmproject:libwebp`, each in lowercase letters, digits, `_`, `.`,
+  `-`, `+` and `~`. Several are separated by single spaces, the one NVD
+  uses now first: krb5's is `mit:kerberos_5 mit:kerberos`, the second
+  being NVD's name for older releases. A distribution's name for its
+  package of the library, such as `redhat:libpng`, isn't listed, nor is
+  another project with the same product name: `bzip2_project:bzip2` is
+  a Rust crate. A library NVD has no CPE name for has `none`, so a
+  value that was forgotten can't pass for one that was checked.
+  **cpe** is required on every mapped row. **osv** isn't used in
+  version 1 (see "Other advisory sources" under [Later](#later-tbd)).
 - `skip` marks a prefix the maintainer has looked at and isn't tracking,
   so it doesn't come back as a TODO. A `skip` row has every column empty
   except **prefix** and **library**.
@@ -862,8 +869,8 @@ date = 2024-04-12
 - **id**: `CVE-`, the year, `-` and four or more digits. A CVE is listed
   once for each library it affects, so **id** and **library** together
   are unique.
-- **library**: a library the map tracks, not `skip`, whose rows have a
-  **cpe**.
+- **library**: a library the map tracks, not `skip`, whose **cpe**
+  isn't `none`.
 - **published**: the day NVD published the CVE, in UTC, from 2020-01-01
   on.
 - **component**: `library` when the bug is in the library's own code, or
@@ -921,7 +928,7 @@ naming the CVE, its library and the field:
   listed twice, or a duplicate that is also a row's **id**, appears twice
   in one row or is listed for two different CVEs (a CVE in two libraries
   lists its duplicates in both rows);
-- a library the map doesn't track, or one with no **cpe**;
+- a library the map doesn't track, or one whose **cpe** is `none`;
 - a **published** day before 2020-01-01;
 - a **component** other than `library` or `tool`, a `tool` without
   **tool**, or **tool** on a `library` row;
@@ -941,6 +948,78 @@ naming the CVE, its library and the field:
 A commit is 40 lowercase hex digits. Whether a fix's tag exists and
 contains its commits isn't checked at load time, since tags come from
 phase 06's clone: the range verifier (6.3) checks them.
+
+### Candidates from NVD
+
+Phase 10 drafts candidates for the table: for each library, every CVE
+that NVD's API returns for one of its CPE names and that NVD published
+on or after 2020-01-01. Candidates stay in the episode. The table is
+edited by hand (roadmap 6.4), and nothing is copied into it.
+
+A query by CPE finds only CVEs whose NVD record has a product list
+naming the library, so no candidates means none were found that way,
+never that the library has no CVEs. NVD has no CPE name for libsodium,
+and its CVE-2025-69277, which NVD has deferred, has no product list.
+Nor has libpq's CVE-2025-1094, which its CNA scored `HIGH` (see "Other
+advisory sources" under [Later](#later-tbd)).
+
+For each name in the library's **cpe**, phase 10 asks NVD's CVE API
+for `virtualMatchString=cpe:2.3:a:<vendor>:<product>` with
+`resultsPerPage=2000`, the most the API allows, and pages with
+`startIndex` until it has `totalResults` CVEs. It sends no dates, since
+a query's published range can span at most 120 days, and keeps the
+CVEs NVD published on or after 2020-01-01, in UTC. It waits 6 seconds
+between requests, the pace NVD's documentation sets for clients
+without an API key, and sends no key. A library whose **cpe** is
+`none` gets a `skipped` line with reason `no_cpe`. A failed request, a
+page whose `totalResults` differs from the first page's, fewer distinct
+CVEs than `totalResults`, a response that isn't JSON or a field of the
+wrong type makes the library's line `error` with no candidates, so a
+partial answer never passes for a whole one.
+
+Nothing is dropped for its scores. Each candidate's **scope** comes
+from the CVSS v3.0, v3.1 and v4.0 scores NVD lists: `in` when any is
+labeled `HIGH` or `CRITICAL`, the table's rule, or is 7.0 or more, so a
+label that doesn't fit its score can't hide a candidate; `out` when it
+has such scores and none is; and `unscored` when it has none.
+NVD no longer scores every CVE, so an unscored candidate is checked by
+hand like one in scope; one that is `out` is listed but needn't be.
+
+The library's line has `cpe`, the names queried; `nvd_timestamp`, the
+first response's `timestamp`; `total`, each name's `totalResults`
+before the date filter; and `candidates`, ordered by `published` and
+then `id`, each with:
+
+- `id`, `status` (NVD's `vulnStatus`), `published` and
+  `last_modified`, verbatim;
+- `cpe`: the library's names whose queries returned it;
+- `scope`, as above, and `scores`: each CVSS v3.0, v3.1 and v4.0
+  metric as its `source`, `type`, CVSS `version`, `score` and `label`,
+  verbatim;
+- `kev`: NVD's `cisaExploitAdd`, the day CISA added the CVE to its
+  Known Exploited Vulnerabilities catalog, or `null`;
+- `description`: NVD's English description;
+- `ranges`: every `cpeMatch` entry, from any configuration, whose
+  criteria name one of the library's CPE names, with all its fields
+  verbatim;
+- `affected`: the record's `affected` list as NVD gives it, or `null`;
+- `patches`: the URLs of references tagged `Patch`, each once, in
+  NVD's order.
+
+Ranges, patch links and `affected` lists are claims, recorded verbatim
+and never used unverified: CVE-2023-4863's Patch link is a commit no
+release before 1.4.0 contains (see [The CVE table](#the-cve-table)). A
+candidate with no range, because no criteria name the library, is kept
+and checked by hand. A rejected CVE has no product list, so a query by
+CPE never returns it; CVE-2023-5129 is reached only as a
+**duplicates** entry.
+
+Phase 10 reads neither the CVE table nor phase 06's clone, so editing
+the table needs no phase file deleted. Its candidates are a snapshot of
+NVD: to take a new one, delete `10-cves.jsonl` and every later phase
+file. A changed **cpe** changes the map, so pre-flight check 5 already
+names phase 10's file. Which candidates the table lists is for a
+report that reads the table on every run (roadmap 6.3).
 
 ## Roadmap
 
@@ -1224,14 +1303,24 @@ again only rows.
   for libwebp. Manual check: a full episode rerun from phase 06 after
   the map change writes the same reports as before, and a table whose
   fix tag libwebp's **tags** doesn't match stops pre-flight.
-- **6.2** Phase 10's importer: draft candidate rows for each library from
-  NVD, by CPE. Requires **cpe** on every mapped row.
+- **6.2** Phase 10, candidate CVEs from NVD, as described in
+  [Candidates from NVD](#candidates-from-nvd): a query by each of a
+  library's CPE names, and every candidate published from 2020-01-01
+  on, with its scope, scores, ranges and patch links verbatim. **cpe**
+  is required on every mapped row, may hold several names or `none`,
+  and is filled in for every library from NVD's CPE dictionary and CVE
+  records. Tests use recorded responses. Manual check: a full episode
+  rerun from phase 06 after the map change writes the same reports as
+  before; phase 10 lists CVE-2023-4863 for libwebp, `in` scope, with
+  its Patch link, and gives geos and libsodium `skipped` lines.
   **← current**
 - **6.3** Range verifier: given phase 06's clone and a row's fixes and
   introducing commit, compute the release tags that contain them and
   their dates; compare against the table's tags and dates and NVD's
   ranges, and flag disagreements. Tests use a small synthetic git
-  repository.
+  repository. A CVE report, rewritten every run from phase 10 and the
+  table, shows each candidate and whether the table lists it, as a row
+  or a **duplicates** entry, beside the verifier's flags.
 - **6.4** *(maintainer input)* Curation review: resolve flagged rows, one
   library per pull request. Corrections to public advisories are submitted
   upstream. A bug in an original library can also be in a fork's code
@@ -1395,9 +1484,13 @@ again only rows.
   for immediate enrichment; its unenriched backlog from before March 1,
   2026 is not scheduled either. Enrichment adds severity scores and
   product lists, and a query by CPE finds a CVE only through its product
-  list, so a CVE NVD hasn't enriched is missed. NVD also no longer
-  routinely scores a CVE its CNA has scored; the scope rule's "any score"
-  covers that.
+  list, so a CVE NVD hasn't enriched is missed. libpq's CVE-2025-1094,
+  which its CNA scored `HIGH` and NVD has deferred, is one, and libsodium
+  and geos have no CPE name at all. NVD also no longer routinely scores
+  a CVE its CNA has scored; the scope rule's "any score" covers that.
+  NVD's API also carries each record's `affected` list, the vendor and
+  product in the CNA's own words (libsodium's CVE-2025-69277 has one),
+  which isn't a CPE and which phase 10 records but doesn't search.
   OSV gives git ranges for C libraries, but its record for CVE-2023-4863
   derives them from the same CPE range and patch link NVD has, so there
   it isn't an independent source; it may list CVEs NVD hasn't matched.
