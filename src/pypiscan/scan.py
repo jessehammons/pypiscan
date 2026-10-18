@@ -1,7 +1,7 @@
 """Run a package list through the scan's phases, one finished phase at a time.
 
 See README "How a scan runs". Each phase writes ``NN-<phase>.jsonl.partial``
-with one line per package, or in phases 06 and 07 per library, and renames
+with one line per package, or in phases 06, 07 and 10 per library, and renames
 it when every one is done, so an episode directory only ever holds whole phase
 files plus at most one ``.partial`` left by an interrupted run.
 """
@@ -11,6 +11,7 @@ import importlib.metadata
 import json
 import re
 import signal
+import time
 import zipfile
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -33,6 +34,7 @@ from pypiscan.library_map import (
     LibraryMapError,
     MapRow,
     VersionFunction,
+    cpe_names,
     load_ambiguous_versions,
     load_library_map,
     matcher,
@@ -42,6 +44,7 @@ from pypiscan.library_map import (
 )
 from pypiscan.library_report import libraries, report, todo, write_todo
 from pypiscan.noise import usable
+from pypiscan.nvd import NvdError, Pacer, candidates
 from pypiscan.package_list import Package, PackageListError, load_package_list
 from pypiscan.pypi import (
     ARCH,
@@ -108,6 +111,7 @@ class Library:
     name: str
     repo: str
     tags: str
+    cpe: str = ""
 
 
 @dataclass(frozen=True)
@@ -417,7 +421,9 @@ def upstream_libraries(rows: Sequence[MapRow]) -> list[Library]:
     found: dict[str, Library] = {}
     for row in rows:
         if row.library != SKIP:
-            found.setdefault(row.library, Library(row.library, row.repo, row.tags))
+            found.setdefault(
+                row.library, Library(row.library, row.repo, row.tags, row.cpe)
+            )
     return list(found.values())
 
 
@@ -508,6 +514,28 @@ def library_phases(
         upstream_phase(cache_dir, episode, map_sha256, UPSTREAM_HOST),
         recognizers_phase(rows),
     ]
+
+
+def cves_phase(client: HttpClient, sleep: Callable[[float], None]) -> Phase[Library]:
+    """Phase 10: candidate CVEs from NVD, by each of the library's CPE names.
+
+    One pacer serves the whole phase, so requests are paced across
+    libraries too. A library whose cpe is ``none`` is ``skipped`` with
+    reason ``no_cpe``; any failure makes its line ``error`` with no
+    candidates. Reads neither the CVE table nor phase 06's clone.
+    """
+    pace = Pacer(sleep)
+
+    def run(library: Library, earlier: Mapping[str, Line]) -> Result:
+        names = cpe_names(library.cpe)
+        if not names:
+            return Result("skipped", "no_cpe", {"cpe": []})
+        try:
+            return Result("ok", None, candidates(client, names, pace))
+        except NvdError as exc:
+            return Result("error", str(exc), {"cpe": cast(object, names)})
+
+    return Phase("10-cves", run, skip_not_ok=False)
 
 
 def write_json(path: Path, value: object) -> None:
@@ -826,8 +854,10 @@ def scan(
     client: HttpClient,
     err: TextIO,
     stop: Stop | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> int:
-    """Pre-flight, then create the directories, record episode.json and run."""
+    """Pre-flight, then create the directories, record episode.json and run.
+    ``sleep`` paces phase 10's requests to NVD."""
     packages, rows, ambiguous, count, problems = preflight(
         package_list,
         library_map,
@@ -885,6 +915,10 @@ def scan(
             )
         if (episode / "09-sboms.jsonl").is_file():
             write_sbom_report(episode, packages, names, rows, ambiguous)
-        return status
+        if status:
+            return status
+        # Phase 10 is per library again, and reads no earlier phase.
+        part_4 = [cves_phase(client, sleep)]
+        return run_phases(episode, libraries, part_4, stop, err, key="library")
     finally:
         signal.signal(signal.SIGINT, handler)

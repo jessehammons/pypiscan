@@ -17,7 +17,7 @@ from datetime import date, datetime, time
 from pathlib import Path
 from typing import cast
 
-from pypiscan.library_map import SKIP, MapRow, tag_matcher
+from pypiscan.library_map import NO_CPE, SKIP, MapRow, tag_matcher
 
 # [0-9], not \d, which also matches other scripts' digits, such as
 # FULLWIDTH DIGIT TWO.
@@ -261,8 +261,8 @@ def _cve(table: Table, tracked: dict[str, MapRow]) -> Cve:
     row = tracked.get(library)
     if row is None:
         raise _Problem("library", f"{library!r} isn't a library the map tracks")
-    if not row.cpe:
-        raise _Problem("library", f"{library!r} has no cpe in the library map")
+    if row.cpe == NO_CPE:
+        raise _Problem("library", f"{library!r} has cpe none in the library map")
     published = _date(table["published"], "published")
     if published < EARLIEST:
         raise _Problem("published", f"{published} is before {EARLIEST}")

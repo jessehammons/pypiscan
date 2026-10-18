@@ -28,7 +28,7 @@ ROWS = [
     row("libwebp", "webmproject:libwebp"),
     MapRow("libwebpmux", "libwebp", WEBP, "v{version}", "", "", "", "", "w:w", ""),
     row("foo", "foo:foo", tags="foo-{version}"),
-    row("bar"),
+    row("bar", "none"),
     MapRow("libgfortran", "skip", "", "", "", "", "", "", "", ""),
 ]
 
@@ -241,7 +241,7 @@ REJECTED = [
         edit('["CVE-2023-5129"]', '["CVE-\uff12\uff10\uff12\uff13-5129"]'),
         f"{HEAD}: duplicates[0]: 'CVE-\uff12\uff10\uff12\uff13-5129' isn't a CVE ID",
     ),
-    # A library the map doesn't track, or one with no cpe.
+    # A library the map doesn't track, or one whose cpe is none.
     (
         edit('library = "libwebp"', 'library = "zlib"'),
         "CVE-2023-4863 zlib: library: 'zlib' isn't a library the map tracks",
@@ -252,7 +252,7 @@ REJECTED = [
     ),
     (
         edit('library = "libwebp"', 'library = "bar"'),
-        "CVE-2023-4863 bar: library: 'bar' has no cpe in the library map",
+        "CVE-2023-4863 bar: library: 'bar' has cpe none in the library map",
     ),
     (edit('library = "libwebp"', 'library = ""'), "CVE-2023-4863: library: is"),
     # The day NVD published it.

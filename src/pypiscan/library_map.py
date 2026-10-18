@@ -9,9 +9,10 @@ compiles with ``matcher``, or ``parse_version_function`` for a
 ``version_function_machine_code`` row, and every kind but ``build_path``
 cites an ``identity_file``. A row with no kind marks a library that is
 identified but has no recognizer yet. A ``bare_version`` row's prefix maps
-to no other library. ``cpe``, when set, is the vendor and product of the
-library's CPE names in NVD, joined by ``:``; a library in the CVE table
-(``cve_table``) needs one. ``osv`` isn't used in version 1.
+to no other library. ``cpe`` is required on a mapped row: the vendor and
+product of each of the library's CPE names in NVD, joined by ``:`` and
+separated by single spaces, or ``none`` (``cpe_names``). ``osv`` isn't used
+in version 1.
 ``load_ambiguous_versions`` reads the list of ambiguous versions against the
 map's rows.
 """
@@ -51,6 +52,8 @@ C_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 NUMBER = re.compile(r"\d+")
 # A CPE's vendor and product, joined by ":".
 CPE = re.compile(r"[a-z0-9_.+~-]+:[a-z0-9_.+~-]+")
+# The cpe of a library NVD has no CPE name for.
+NO_CPE = "none"
 
 
 class LibraryMapError(Exception):
@@ -183,6 +186,28 @@ def tag_version(text: str) -> str:
     return re.sub(r"(?<=\d)[_-](?=\d)", ".", text)
 
 
+def cpe_names(cpe: str) -> list[str]:
+    """A mapped row's ``cpe`` as its names, none for ``none``."""
+    return [] if cpe == NO_CPE else cpe.split(" ")
+
+
+def _cpe_problem(cpe: str) -> str | None:
+    if not cpe:
+        return "cpe is empty; use none for a library NVD has no CPE name for"
+    names = cpe_names(cpe)
+    if "" in names:
+        return f"cpe {cpe!r} has an empty name; names are separated by single spaces"
+    for name in names:
+        if not CPE.fullmatch(name):
+            return (
+                f"cpe {cpe!r}: {name!r} isn't none or a vendor and product joined "
+                "by ':', each in lowercase letters, digits, _, ., -, + and ~"
+            )
+    if len(set(names)) != len(names):
+        return f"cpe {cpe!r} lists a name twice"
+    return None
+
+
 def _row_problem(row: dict[str, str]) -> str | None:
     """Why ``row`` doesn't fit its kind, or ``None`` if it's valid."""
     missing = [name for name in ("prefix", "library") if not row[name]]
@@ -198,11 +223,8 @@ def _row_problem(row: dict[str, str]) -> str | None:
         return f"{', '.join(missing)} is empty"
     if row["identity"]:
         return "identity is empty in version 1"
-    if row["cpe"] and not CPE.fullmatch(row["cpe"]):
-        return (
-            f"cpe {row['cpe']!r} isn't a vendor and product joined by ':', each "
-            "in lowercase letters, digits, _, ., -, + and ~"
-        )
+    if problem := _cpe_problem(row["cpe"]):
+        return problem
     try:
         # A typo here would make phase 06 match no tags.
         _split("tags", row["tags"], {"version"})
