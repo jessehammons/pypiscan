@@ -1116,9 +1116,11 @@ packages, to keep reviews short.
   clones the eight libraries it skipped with reason `not_github`, so
   the staleness report compares them. Each **tags** pattern is checked
   against the real repository (FreeType's `VER-{version}` had never
-  been checked), and every library is cloned from its map row's repo,
-  its real upstream, rather than an official GitHub mirror. It starts
-  with libwebp, which brings Pillow's libwebp rows into the report.
+  been checked), and every library is cloned from its real upstream
+  except PostgreSQL: git.postgresql.org broke off its clone
+  (`fetch-pack: invalid index-pack output`), so its row uses the
+  official mirror, `github.com/postgres/postgres`. It starts with
+  libwebp, which brings Pillow's libwebp rows into the report.
 
 ### 0. Guardrails
 

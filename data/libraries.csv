@@ -12,7 +12,7 @@ libkrb5support,krb5,https://github.com/krb5/krb5,krb5-{version}-final,,,,,mit:ke
 liblber,openldap,https://git.openldap.org/openldap/openldap.git,OPENLDAP_REL_ENG_{version},,,,,openldap:openldap,
 libldap,openldap,https://git.openldap.org/openldap/openldap.git,OPENLDAP_REL_ENG_{version},,,,,openldap:openldap,
 libpcre,skip,,,,,,,,
-libpq,postgresql,https://git.postgresql.org/git/postgresql.git,REL_{version},version_function_machine_code,PQlibVersion -> decimal *.4 from 100000,src/interfaces/libpq/fe-misc.c,,postgresql:postgresql,
+libpq,postgresql,https://github.com/postgres/postgres,REL_{version},version_function_machine_code,PQlibVersion -> decimal *.4 from 100000,src/interfaces/libpq/fe-misc.c,,postgresql:postgresql,
 libsasl2,cyrus-sasl,https://github.com/cyrusimap/cyrus-sasl,cyrus-sasl-{version},bare_version,{version},lib/common.c,,cyrusimap:cyrus-sasl cmu:cyrus-sasl carnegie_mellon_university:cyrus-sasl cyrusimap:cyrus_sasl,
 libselinux,skip,,,,,,,,
 libssl,openssl,https://github.com/openssl/openssl,openssl-{version},,,,,openssl:openssl,
