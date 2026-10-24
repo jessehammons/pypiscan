@@ -10,26 +10,26 @@ from pypiscan.library_map import (
     MapRow,
     VersionFunction,
     cpe_names,
+    is_release,
     load_ambiguous_versions,
     load_library_map,
     matcher,
     parse_version_function,
     tag_matcher,
-    tag_version,
 )
 
 HEADER = ",".join(COLUMNS)
 ZLIB = (
-    "libz,zlib,https://github.com/madler/zlib,v{version},library_string,"
+    "libz,zlib,https://github.com/madler/zlib,v{version},,library_string,"
     "deflate {version} Copyright {any},deflate.c,,none,"
 )
 OPENJPEG = (
-    "libopenjp2,openjpeg,https://github.com/uclouvain/openjpeg,v{version},"
+    "libopenjp2,openjpeg,https://github.com/uclouvain/openjpeg,v{version},,"
     "build_path,{any}/openjpeg-{version}/{any},,,uclouvain:openjpeg,"
 )
-BARE = "libfoo,foo,https://example.org/foo,v{version},bare_version,{version},version.c,,none,"
-WEBP = "libwebp,libwebp,https://chromium.googlesource.com/webm/libwebp,v{version},,,,,none,"
-SKIP = "libgfortran,skip,,,,,,,,"
+BARE = "libfoo,foo,https://example.org/foo,v{version},,bare_version,{version},version.c,,none,"
+WEBP = "libwebp,libwebp,https://chromium.googlesource.com/webm/libwebp,v{version},,,,,,none,"
+SKIP = "libgfortran,skip,,,,,,,,,"
 
 
 def write_map(path: Path, *rows: str, header: str = HEADER) -> Path:
@@ -75,7 +75,7 @@ def test_rows_of_every_kind(tmp_path: Path) -> None:
 
 def test_a_prefix_can_map_to_several_libraries(tmp_path: Path) -> None:
     ng = (
-        "libz,zlib-ng,https://github.com/zlib-ng/zlib-ng,{version},library_string,"
+        "libz,zlib-ng,https://github.com/zlib-ng/zlib-ng,{version},,library_string,"
         "zlib-ng {version},zbuild.h,,none,"
     )
     inflate = ZLIB.replace("deflate", "inflate")
@@ -106,7 +106,7 @@ def test_rejects_wrong_columns(tmp_path: Path, header: str, message: str) -> Non
 
 @pytest.mark.parametrize("cpe", ["webmproject:libwebp", "a_b.c+d~e-0:x"])
 def test_accepts_a_cpe_vendor_and_product(tmp_path: Path, cpe: str) -> None:
-    path = write_map(tmp_path / "m.csv", f"libz,zlib,r,v{{version}},,,,,{cpe},")
+    path = write_map(tmp_path / "m.csv", f"libz,zlib,r,v{{version}},,,,,,{cpe},")
     assert [row.cpe for row in load_library_map(path)] == [cpe]
 
 
@@ -124,7 +124,7 @@ def test_accepts_a_cpe_vendor_and_product(tmp_path: Path, cpe: str) -> None:
     ],
 )
 def test_rejects_a_cpe_of_the_wrong_shape(tmp_path: Path, cpe: str) -> None:
-    path = write_map(tmp_path / "m.csv", f"libz,zlib,r,v{{version}},,,,,{cpe},")
+    path = write_map(tmp_path / "m.csv", f"libz,zlib,r,v{{version}},,,,,,{cpe},")
     with pytest.raises(LibraryMapError, match=f"{path}:2: cpe '{re.escape(cpe)}'"):
         load_library_map(path)
 
@@ -140,7 +140,7 @@ def test_rejects_a_cpe_of_the_wrong_shape(tmp_path: Path, cpe: str) -> None:
 def test_accepts_several_cpe_names_or_none(
     tmp_path: Path, cpe: str, names: list[str]
 ) -> None:
-    path = write_map(tmp_path / "m.csv", f"libz,zlib,r,v{{version}},,,,,{cpe},")
+    path = write_map(tmp_path / "m.csv", f"libz,zlib,r,v{{version}},,,,,,{cpe},")
     [row] = load_library_map(path)
     assert (row.cpe, cpe_names(row.cpe)) == (cpe, names)
 
@@ -167,14 +167,14 @@ def test_accepts_several_cpe_names_or_none(
 def test_rejects_a_bad_list_of_cpe_names(
     tmp_path: Path, cpe: str, message: str
 ) -> None:
-    path = write_map(tmp_path / "m.csv", f"libz,zlib,r,v{{version}},,,,,{cpe},")
+    path = write_map(tmp_path / "m.csv", f"libz,zlib,r,v{{version}},,,,,,{cpe},")
     with pytest.raises(LibraryMapError) as raised:
         load_library_map(path)
     assert str(raised.value).startswith(f"{path}:2: {message}")
 
 
 def test_rows_for_one_library_agree_on_every_cpe_name(tmp_path: Path) -> None:
-    first = "libz,zlib,r,v{version},,,,,a:a b:b,"
+    first = "libz,zlib,r,v{version},,,,,,a:a b:b,"
     path = write_map(tmp_path / "m.csv", first, first.replace("libz,", "libz2,"))
     assert len(load_library_map(path)) == 2
     path = write_map(
@@ -187,63 +187,69 @@ def test_rows_for_one_library_agree_on_every_cpe_name(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("row", "message"),
     [
-        ("libz,zlib", "expected 10 fields, got 2"),
-        (ZLIB + ",extra", "expected 10 fields, got 11"),
-        (",zlib,r,,,,,,none,", "prefix is empty"),
-        ("libz,,r,,,,,,none,", "library is empty"),
-        ("libz,zlib,,,,,,,none,", "repo, tags is empty"),
-        ("libz,zlib,r,,,,,,none,", "tags is empty"),
-        ("libz,zlib,r,,library_string,zlib {version},f,,none,", "tags is empty"),
-        ("libz,zlib,,v{version},build_path,{any}/z-{version}/{any},,,none,", "repo is"),
+        ("libz,zlib", "expected 11 fields, got 2"),
+        (ZLIB + ",extra", "expected 11 fields, got 12"),
+        (",zlib,r,,,,,,,none,", "prefix is empty"),
+        ("libz,,r,,,,,,,none,", "library is empty"),
+        ("libz,zlib,,,,,,,,none,", "repo, tags is empty"),
+        ("libz,zlib,r,,,,,,,none,", "tags is empty"),
+        ("libz,zlib,r,,,library_string,zlib {version},f,,none,", "tags is empty"),
         (
-            "libz,zlib,r,v{version},header_string,{version},f,,none,",
+            "libz,zlib,,v{version},,build_path,{any}/z-{version}/{any},,,none,",
+            "repo is",
+        ),
+        (
+            "libz,zlib,r,v{version},,header_string,{version},f,,none,",
             "unknown kind 'header_string'",
         ),
-        ("libz,zlib,r,v{version},library_string,,f,,none,", "pattern is empty"),
+        ("libz,zlib,r,v{version},,library_string,,f,,none,", "pattern is empty"),
         (
-            "libz,zlib,r,v{version},,{version},,,none,",
+            "libz,zlib,r,v{version},,,{version},,,none,",
             "a row with no kind has no pattern",
         ),
         (
-            "libz,zlib,r,v{version},,,f,,none,",
+            "libz,zlib,r,v{version},,,,f,,none,",
             "a row with no kind has no identity_file",
         ),
         (
-            "libz,zlib,r,v{version},build_path,{version}/{any},f,,none,",
+            "libz,zlib,r,v{version},,build_path,{version}/{any},f,,none,",
             "a build_path row has no",
         ),
-        ("libz,zlib,r,v{version},build_path,{version}/{any},,i,,", "identity is"),
+        ("libz,zlib,r,v{version},,build_path,{version}/{any},,i,,", "identity is"),
         (
-            "libz,zlib,r,v{version},library_string,zlib {version},,,none,",
+            "libz,zlib,r,v{version},,library_string,zlib {version},,,none,",
             "a library_string row needs",
         ),
         (
-            "libz,zlib,r,v{version},bare_version,{version},,,none,",
+            "libz,zlib,r,v{version},,bare_version,{version},,,none,",
             "a bare_version row needs an",
         ),
         (
-            "libz,zlib,r,v{version},library_string,zlib {version},f,i,,",
+            "libz,zlib,r,v{version},,library_string,zlib {version},f,i,,",
             "identity is empty in version 1",
         ),
         (
-            "libz,zlib,r,v{version},library_string,zlib,f,,none,",
+            "libz,zlib,r,v{version},,library_string,zlib,f,,none,",
             r"pattern needs exactly one \{version\}",
         ),
         (
-            "libz,zlib,r,v{version},library_string,{version} {version},f,,none,",
+            "libz,zlib,r,v{version},,library_string,{version} {version},f,,none,",
             "pattern needs exactly one",
         ),
         (
-            "libz,zlib,r,v{version},library_string,{version} {date},f,,none,",
+            "libz,zlib,r,v{version},,library_string,{version} {date},f,,none,",
             r"pattern has an unknown placeholder \{date\}",
         ),
         (
-            "libz,zlib,r,v{version},bare_version,v{version},f,,none,",
+            "libz,zlib,r,v{version},,bare_version,v{version},f,,none,",
             "a bare_version pattern is",
         ),
-        ("libz,skip,,,library_string,,,,,", "a skip row has only a prefix and library"),
-        ("libz,skip,,,,,,,zlib:zlib,", "a skip row .* but cpe is set"),
-        ("libz,skip,r,,,,,i,,o", "a skip row .* but repo is set"),
+        (
+            "libz,skip,,,,library_string,,,,,",
+            "a skip row has only a prefix and library",
+        ),
+        ("libz,skip,,,,,,,,zlib:zlib,", "a skip row .* but cpe is set"),
+        ("libz,skip,r,,,,,,i,,o", "a skip row .* but repo is set"),
     ],
 )
 def test_rejects_rows_that_dont_fit(tmp_path: Path, row: str, message: str) -> None:
@@ -255,22 +261,23 @@ def test_rejects_rows_that_dont_fit(tmp_path: Path, row: str, message: str) -> N
 @pytest.mark.parametrize(
     ("first", "second", "message"),
     [
-        (ZLIB, "libz,skip,,,,,,,,", "prefix 'libz' is both skip and mapped"),
+        (ZLIB, "libz,skip,,,,,,,,,", "prefix 'libz' is both skip and mapped"),
         (
             SKIP,
-            "libgfortran,gcc,r,v{version},,,,,none,",
+            "libgfortran,gcc,r,v{version},,,,,,none,",
             "prefix 'libgfortran' is both skip",
         ),
         (
             WEBP,
             WEBP.replace(
-                "v{version},,,,,none,", "v{version},bare_version,{version},v.h,,none,"
+                "v{version},,,,,,none,",
+                "v{version},,bare_version,{version},v.h,,none,",
             ),
             "library 'libwebp' under prefix 'libwebp' has a row with no kind",
         ),
         (
             BARE,
-            "libfoo,foo,https://example.org/foo,v{version},,,,,none,",
+            "libfoo,foo,https://example.org/foo,v{version},,,,,,none,",
             "library 'foo' under prefix 'libfoo' has a row with no kind",
         ),
         (
@@ -285,7 +292,7 @@ def test_rejects_rows_that_dont_fit(tmp_path: Path, row: str, message: str) -> N
         ),
         (
             ZLIB,
-            "libz2,zlib,https://github.com/madler/zlib,{version},bare_version,{version},z.h,,none,",
+            "libz2,zlib,https://github.com/madler/zlib,{version},,bare_version,{version},z.h,,none,",
             "library 'zlib' has another tags",
         ),
         (BARE, BARE[:-7] + ",,foo:foo,OSV", "library 'foo' has another cpe, osv"),
@@ -360,7 +367,7 @@ def test_bare_version_shape(text: str, version: str | None) -> None:
 
 @pytest.mark.parametrize("tags", ["v{version}", "bzip2-{version}"])
 def test_accepts_tags_with_one_version(tmp_path: Path, tags: str) -> None:
-    row = f"libz,zlib,r,{tags},,,,,none,"
+    row = f"libz,zlib,r,{tags},,,,,,none,"
     assert load_library_map(write_map(tmp_path / "m.csv", row))[0].tags == tags
 
 
@@ -375,7 +382,7 @@ def test_accepts_tags_with_one_version(tmp_path: Path, tags: str) -> None:
 def test_rejects_tags_without_one_version(
     tmp_path: Path, tags: str, message: str
 ) -> None:
-    path = write_map(tmp_path / "m.csv", f"libz,zlib,r,{tags},,,,,none,")
+    path = write_map(tmp_path / "m.csv", f"libz,zlib,r,{tags},,,,,,none,")
     with pytest.raises(LibraryMapError, match=f"{path}:2: {message}"):
         load_library_map(path)
 
@@ -398,16 +405,15 @@ def test_rejects_tags_without_one_version(
     ],
 )
 def test_tag_matcher(tags: str, tag: str, version: str | None) -> None:
-    match = tag_matcher(tags).fullmatch(tag)
-    assert (match and tag_version(match[1])) == version
+    assert tag_matcher(tags)(tag) == version
 
 
 # libfoo's bare_version row, and another library under the same prefix.
 BAR_KIND = (
-    "libfoo,bar,https://example.org/bar,v{version},library_string,"
+    "libfoo,bar,https://example.org/bar,v{version},,library_string,"
     "bar {version},bar.c,,none,"
 )
-BAR_NO_KIND = "libfoo,bar,https://example.org/bar,v{version},,,,,none,"
+BAR_NO_KIND = "libfoo,bar,https://example.org/bar,v{version},,,,,,none,"
 
 
 @pytest.mark.parametrize("other", [BAR_KIND, BAR_NO_KIND], ids=["kind", "no-kind"])
@@ -429,7 +435,9 @@ def test_rejects_bare_version_under_a_multi_library_prefix(
 
 def test_bare_version_under_a_single_library_prefix(tmp_path: Path) -> None:
     other_prefix = BAR_KIND.replace("libfoo,", "libbar,", 1)
-    lib_string = BARE.replace("bare_version,{version}", "library_string,foo {version}")
+    lib_string = BARE.replace(
+        "bare_version,{version},", "library_string,foo {version},"
+    )
     rows = load_library_map(
         write_map(tmp_path / "m.csv", BARE, lib_string, other_prefix)
     )
@@ -442,7 +450,7 @@ def test_bare_version_under_a_single_library_prefix(tmp_path: Path) -> None:
 
 # version_function_machine_code rows (roadmap 4.6).
 
-FUNCTION = "libwebp,libwebp,r,v{version},version_function_machine_code,{},f.c,,none,"
+FUNCTION = "libwebp,libwebp,r,v{version},,version_function_machine_code,{},f.c,,none,"
 
 
 @pytest.mark.parametrize(
@@ -533,12 +541,12 @@ def test_version_function_row_needs_an_identity_file(tmp_path: Path) -> None:
 
 def test_version_function_shares_a_prefix(tmp_path: Path) -> None:
     rows = [
-        "libavif,libavif,r,v{version},version_function_machine_code,"
+        "libavif,libavif,r,v{version},,version_function_machine_code,"
         "avifVersion -> string {version},src/avif.c,,none,",
-        "libavif,aom,a,v{version},library_string,AOMedia {version},av1.c,,none,",
-        "libavif,dav1d,d,{version},version_function_machine_code,"
+        "libavif,aom,a,v{version},,library_string,AOMedia {version},av1.c,,none,",
+        "libavif,dav1d,d,{version},,version_function_machine_code,"
         "dav1d_version -> string {version}-0-g{any},src/lib.c,,none,",
-        "libavif,yuv,y,{version},,,,,none,",
+        "libavif,yuv,y,{version},,,,,,none,",
     ]
     loaded = load_library_map(write_map(tmp_path / "m.csv", *rows))
     assert [(r.library, r.kind) for r in loaded] == [
@@ -615,3 +623,66 @@ def test_committed_ambiguous_list_loads_against_committed_map() -> None:
     found = load_ambiguous_versions(data / "ambiguous_versions.csv", rows)
     assert found["lcms2"]["2.19.0"] == ["2.19.1"]
     assert found["libavif"]["0.3.0"] == ["0.3.1"]
+
+
+# Several tags patterns, and versions that aren't releases (roadmap S.3).
+
+
+def test_tags_patterns_are_tried_in_order() -> None:
+    version = tag_matcher("lcms2-{version} lcms{version} {version}")
+    assert version("lcms2-2.7") == "2.7"
+    assert version("lcms2.19") == "2.19"
+    assert version("2.11") == "2.11"
+    assert version("lcm2.16rc1") is None
+    # The first pattern that matches wins, even when a later one would too.
+    assert tag_matcher("v{version} {version}")("v1.2") == "1.2"
+    assert tag_matcher("{version} v{version}")("v1.2") == "1.2"
+
+
+@pytest.mark.parametrize(
+    ("version", "not_release", "release"),
+    [
+        ("3.1.4.1", r"\d+\.\d+\.9\d", True),
+        ("3.1.90", r"\d+\.\d+\.9\d", False),
+        ("2.1.91", r"\d+\.\d+\.9\d", False),
+        ("3.1.900", r"\d+\.\d+\.9\d", True),
+        ("3.1.90", "", True),
+        ("2.19rc1", "", False),
+        ("2.18rc_1", "", False),
+        ("18_BETA1", "", False),
+    ],
+)
+def test_is_release(version: str, not_release: str, release: bool) -> None:
+    assert is_release(version, not_release) is release
+
+
+def test_loads_tags_patterns_and_not_release(tmp_path: Path) -> None:
+    row = r"libz,zlib,r,lcms2-{version} {version},\d+\.\d+\.9\d,,,,,none,"
+    [loaded] = load_library_map(write_map(tmp_path / "m.csv", row))
+    assert loaded.tags == "lcms2-{version} {version}"
+    assert loaded.not_release == r"\d+\.\d+\.9\d"
+
+
+@pytest.mark.parametrize(
+    ("tags", "not_release", "message"),
+    [
+        ("v{version}  {version}", "", "tags 'v{version}  {version}' has an empty"),
+        ("v{version} v1.2", "", r"tags needs exactly one \{version\}"),
+        ("v{version}", "(", "not_release '\\(' isn't a regex"),
+    ],
+)
+def test_rejects_bad_tags_patterns_and_not_release(
+    tmp_path: Path, tags: str, not_release: str, message: str
+) -> None:
+    row = f"libz,zlib,r,{tags},{not_release},,,,,none,"
+    path = write_map(tmp_path / "m.csv", row)
+    with pytest.raises(LibraryMapError, match=f"{path}:2: {message}"):
+        load_library_map(path)
+
+
+def test_rows_for_one_library_agree_on_not_release(tmp_path: Path) -> None:
+    first = r"libz,zlib,r,v{version},\d+\.9\d,,,,,none,"
+    second = first.replace("libz,", "libz2,", 1).replace(r"\d+\.9\d", "")
+    path = write_map(tmp_path / "m.csv", first, second)
+    with pytest.raises(LibraryMapError, match="has another not_release"):
+        load_library_map(path)

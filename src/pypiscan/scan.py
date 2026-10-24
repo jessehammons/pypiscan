@@ -34,12 +34,12 @@ from pypiscan.library_map import (
     MapRow,
     VersionFunction,
     cpe_names,
+    is_release,
     load_ambiguous_versions,
     load_library_map,
     matcher,
     parse_version_function,
     tag_matcher,
-    tag_version,
 )
 from pypiscan.library_report import libraries, report, todo, write_todo
 from pypiscan.noise import usable
@@ -67,8 +67,9 @@ from pypiscan.wheel_sboms import sboms_wheel
 from pypiscan.wheel_strings import BinaryStrings, strings_wheel
 
 SCHEMA_VERSION = 1
-# Phase 06's lines gained each tag's date (roadmap S.1).
-UPSTREAM_SCHEMA_VERSION = 2
+# Phase 06's lines gained each tag's date (roadmap S.1), then whether it is
+# a release (S.3).
+UPSTREAM_SCHEMA_VERSION = 3
 EPISODE_SCHEMA_VERSION = 2
 MB = 1_000_000
 WHEEL_SIZE_LIMIT = 100 * MB
@@ -112,6 +113,7 @@ class Library:
     repo: str
     tags: str
     cpe: str = ""
+    not_release: str = ""
 
 
 @dataclass(frozen=True)
@@ -423,13 +425,17 @@ def upstream_libraries(rows: Sequence[MapRow]) -> list[Library]:
     for row in rows:
         if row.library != SKIP:
             found.setdefault(
-                row.library, Library(row.library, row.repo, row.tags, row.cpe)
+                row.library,
+                Library(row.library, row.repo, row.tags, row.cpe, row.not_release),
             )
     return list(found.values())
 
 
 def upstream_phase(cache_dir: Path, episode: Path, map_sha256: str) -> Phase[Library]:
     """Phase 06: clone or fetch each library, and list the tags its tags matches.
+
+    Each tag gets its version from the first of the tags patterns that
+    matches it, and is marked a release or not with ``is_release``.
 
     Every library is cloned from its map row's repo, on any host. When every
     library is done, records the map's sha256 in episode.json for pre-flight
@@ -447,9 +453,14 @@ def upstream_phase(cache_dir: Path, episode: Path, map_sha256: str) -> Phase[Lib
             return Result("error", str(exc), data)
         matcher = tag_matcher(library.tags)
         found = [
-            {"tag": name, "version": tag_version(match[1]), "date": date}
+            {
+                "tag": name,
+                "version": version,
+                "date": date,
+                "release": is_release(version, library.not_release),
+            }
             for name, date in names.items()
-            if (match := matcher.fullmatch(name))
+            if (version := matcher(name)) is not None
         ]
         if not found:
             return Result(

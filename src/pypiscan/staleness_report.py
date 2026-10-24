@@ -27,11 +27,13 @@ from pypiscan.fingerprint_report import (
 from pypiscan.library_map import SKIP, Ambiguous, MapRow
 from pypiscan.package_list import Package
 
-# Phase 06's lines from this schema_version on list each tag's date.
-DATED = 2
+# Phase 06's lines from this schema_version on list each tag's date and
+# whether it is a release.
+FLAGGED = 3
 RERUN = "rerun from phase 06"
 NO_TAG = "no release tag for the version"
-RELEASE = re.compile(r"\d+(\.\d+)*")
+# A version that can be ordered as a tuple of integers.
+DOTTED = re.compile(r"\d+(\.\d+)*")
 INTRO = """\
 # Staleness report
 
@@ -49,14 +51,14 @@ type Key = tuple[int, ...]
 
 
 def releases(upstream: Line) -> dict[Key, tuple[str, date]]:
-    """Phase 06's release tags as version, keyed by the version as integers,
-    with the earliest date a tag gives it."""
+    """Phase 06's tags marked as releases, as version, keyed by the version
+    as integers, with the earliest date a tag gives it."""
     found: dict[Key, tuple[str, date]] = {}
-    for tag in cast(list[Mapping[str, str]], upstream["tags"]):
-        version = tag["version"]
-        if RELEASE.fullmatch(version):
+    for tag in cast(list[Mapping[str, object]], upstream["tags"]):
+        if tag["release"] is True:
+            version = str(tag["version"])
             key = tuple(int(n) for n in version.split("."))
-            day = date.fromisoformat(tag["date"])
+            day = date.fromisoformat(str(tag["date"]))
             if key not in found or day < found[key][1]:
                 found[key] = (version, day)
     return found
@@ -69,7 +71,7 @@ def upload_day(resolved: Line) -> date:
 
 def _not_compared(upstream: Line) -> str | None:
     """Why phase 06's line leaves a library uncompared, or None."""
-    if cast(int, upstream["schema_version"]) < DATED:
+    if cast(int, upstream["schema_version"]) < FLAGGED:
         return RERUN
     if upstream["status"] == "skipped":
         return str(upstream["reason"])
@@ -91,8 +93,7 @@ def staleness(
     bundled = [
         key
         for v in (version, *others)
-        if RELEASE.fullmatch(v)
-        and (key := tuple(int(n) for n in v.split("."))) in found
+        if DOTTED.fullmatch(v) and (key := tuple(int(n) for n in v.split("."))) in found
     ]
     if not bundled:
         return NO_TAG
@@ -244,7 +245,7 @@ def report(
     if any(_not_compared(line) == RERUN for line in upstream.values()):
         summary.insert(
             0,
-            "- Phase 06's lines predate tag dates, so their libraries aren't "
-            f"compared: {RERUN}.",
+            "- Phase 06's lines predate tag dates or release flags, so their "
+            f"libraries aren't compared: {RERUN}.",
         )
     return "\n".join([INTRO, "## Counts", "", *summary, "", *sections])

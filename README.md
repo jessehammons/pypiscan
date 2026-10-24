@@ -620,10 +620,11 @@ Part 2:
    library the map names, with a recognizer or not, into the cache, or
    fetch into the existing clone (see [Conventions](#conventions)). The
    clone is needed for fixed versions (phase 10). The line lists the
-   release tags the library's **tags** matches, each with the version it
-   names and its date, the day `git for-each-ref` gives as
-   `%(creatordate:short)` (see [The CVE table](#the-cve-table)), which
-   the staleness report reads. A library whose **tags** matches no tag
+   tags the library's **tags** matches, each with the version it names,
+   its date, the day `git for-each-ref` gives as `%(creatordate:short)`
+   (see [The CVE table](#the-cve-table)), and `release`, whether it is a
+   release by the map's rule (see [The library map](#the-library-map)),
+   which the staleness report and the range verifier (6.3) read. A library whose **tags** matches no tag
    is an `error` line, so a
    wrong repo or a misspelled pattern shows up before phase 10 relies on
    it. A host that can't be reached gives an `error` line too.
@@ -678,15 +679,15 @@ Part 2:
 `data/libraries.csv` is curated input, edited by hand and committed like
 the package list. One row per prefix, library and way of identifying it:
 
-| prefix | library | repo | tags | kind | pattern | identity_file | identity | cpe | osv |
-|---|---|---|---|---|---|---|---|---|---|
-| `libtiff` | `libtiff` | `https://gitlab.com/libtiff/libtiff` | `v{version}` | `library_string` | `LIBTIFF, Version {version}` | `libtiff/tiffvers.h.in` | | `libtiff:libtiff` | … |
-| `libfreetype` | `bzip2` | `https://sourceware.org/git/bzip2.git` | `bzip2-{version}` | `library_string` | `{version}, {any}-{any}-20{any}` | `bzlib_private.h` | | `bzip:bzip2` | … |
-| `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | `build_path` | `{any}/openjpeg-{version}/{any}` | | | `uclouvain:openjpeg` | … |
-| `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | `bare_version` | `{version}` | `src/lib/openjp2/opj_config_private.h.cmake.in` | | `uclouvain:openjpeg` | … |
-| `libwebp` | `libwebp` | `https://chromium.googlesource.com/webm/libwebp` | `v{version}` | `version_function_machine_code` | `WebPGetDecoderVersion -> bits *.8.8` | `src/dec/vp8_dec.c` | | `webmproject:libwebp` | … |
-| `libfreetype` | `freetype` | `https://gitlab.freedesktop.org/freetype/freetype` | `VER-{version}` | | | | | `freetype:freetype` | |
-| `libgfortran` | `skip` | | | | | | | | |
+| prefix | library | repo | tags | not_release | kind | pattern | identity_file | identity | cpe | osv |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `libtiff` | `libtiff` | `https://gitlab.com/libtiff/libtiff` | `v{version}` | | `library_string` | `LIBTIFF, Version {version}` | `libtiff/tiffvers.h.in` | | `libtiff:libtiff` | … |
+| `libfreetype` | `bzip2` | `https://sourceware.org/git/bzip2.git` | `bzip2-{version}` | | `library_string` | `{version}, {any}-{any}-20{any}` | `bzlib_private.h` | | `bzip:bzip2` | … |
+| `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | | `build_path` | `{any}/openjpeg-{version}/{any}` | | | `uclouvain:openjpeg` | … |
+| `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | | `bare_version` | `{version}` | `src/lib/openjp2/opj_config_private.h.cmake.in` | | `uclouvain:openjpeg` | … |
+| `libwebp` | `libwebp` | `https://chromium.googlesource.com/webm/libwebp` | `v{version}` | | `version_function_machine_code` | `WebPGetDecoderVersion -> bits *.8.8` | `src/dec/vp8_dec.c` | | `webmproject:libwebp` | … |
+| `libfreetype` | `freetype` | `https://gitlab.freedesktop.org/freetype/freetype` | `VER-{version}` | | | | | | `freetype:freetype` | |
+| `libgfortran` | `skip` | | | | | | | | | |
 
 - **prefix** is how a file is found, **library** is what it turns out to
   be, and **cpe** and **osv** are how advisories name it. The three
@@ -700,13 +701,29 @@ the package list. One row per prefix, library and way of identifying it:
   tags are named, with `{version}` where the version is (`v{version}`,
   `openssl-{version}`). **repo** is required on every mapped row, and so
   is **tags** from roadmap 4.1 on: phase 06 clones every library and lists
-  its release tags, and the range verifier (6.3) reads them. **tags** has
-  exactly one `{version}` and no other placeholder. Some projects spell
+  its release tags, and the range verifier (6.3) reads them. **tags** is
+  one or more patterns separated by single spaces, each with exactly one
+  `{version}` and no other placeholder. They are tried in order, and a
+  tag takes its version from the first that matches, so it is listed
+  once: lcms2 tagged 2.7 `lcms2-2.7`, most releases like `lcms2.19`, and
+  2.11 only `2.11`, so its **tags** is
+  `lcms2-{version} lcms{version} {version}`, and without the first
+  pattern `lcms2-2.7` would list as 2.2.7. Some projects spell
   versions in tags with `_` or `-` (PostgreSQL's `REL_18_6`, OpenLDAP's
   `OPENLDAP_REL_ENG_2_6_15`, FreeType's `VER-2-14-3`), so in **tags**,
   `{version}` also takes `_`, and the version listed for a tag has each `_`
   or `-` between two digits replaced by `.`: `REL_{version}` lists
-  `REL_18_6` as 18.6. Rows for one library agree on **repo**, **tags**,
+  `REL_18_6` as 18.6.
+- **not_release** is empty, or a Python regular expression for the
+  versions **tags** lists that aren't releases: a listed version that it
+  matches in full isn't a release, even when it is digits separated by
+  dots. libjpeg-turbo tags its betas `x.y.90` and up, such as `3.1.90`,
+  so its **not_release** is `\d+\.\d+\.9\d`. The loader rejects one that
+  doesn't compile. Phase 06 marks each listed tag a release when its
+  version is digits separated by dots and doesn't match **not_release**,
+  so a pre-release spelled with letters, such as `lcms2.19rc1`, needs no
+  rule.
+- Rows for one library agree on **repo**, **tags**, **not_release**,
   **cpe** and **osv**.
 - **kind** is one of the version-setting kinds in
   [How versions are identified](#how-versions-are-identified), and
@@ -767,8 +784,8 @@ names no CVE, so it isn't a CVE match (see
 Once phases 01, 06 and 08 are finished, every run rewrites
 `staleness-report.md` in the episode from phases 01, 05, 06 and 08, as
 it rewrites the fingerprint report. Phase files don't change, apart
-from the tag dates phase 06 records. An episode whose phase 06 lines
-predate tag dates compares no library: the report says to rerun from
+from the tag dates and release flags phase 06 records. An episode whose
+phase 06 lines predate tag dates or release flags compares no library: the report says to rerun from
 phase 06, in its counts and as each library's reason.
 
 Staleness is measured against the newest release that existed when the
@@ -777,12 +794,13 @@ doesn't count against the wheel, and a rerun next month gives the same
 answer.
 
 - The wheel's upload day is phase 01's upload time, in UTC.
-- A release is one of phase 06's tags whose version is digits separated
-  by dots. Other tags, such as `2.19rc1`, aren't counted, so most
-  pre-release tags never make a wheel look behind. Some projects spell
-  pre-releases in digits and dots, such as libjpeg-turbo's `x.y.90`
-  betas, and these can overstate staleness (roadmap S.3). Versions are
-  ordered as tuples of integers.
+- A release is one of phase 06's tags marked `release`: its version is
+  digits separated by dots and isn't matched by the library's
+  **not_release** (see [The library map](#the-library-map)). Other
+  tags, such as `2.19rc1` and libjpeg-turbo's `3.1.90` beta, aren't
+  counted, so a pre-release tag never makes a wheel look behind unless
+  the map has no rule for it. Versions are ordered as tuples of
+  integers.
 - The bundled release is the tag phase 06 lists with the fingerprint
   version, as 7.1 tests versions. An ambiguous version (see
   [Ambiguous versions](#ambiguous-versions)) is read as the newest
@@ -1120,20 +1138,16 @@ packages, to keep reviews short.
   (`fetch-pack: invalid index-pack output`), so its row uses the
   official mirror, `github.com/postgres/postgres`. It starts with
   libwebp, which brings Pillow's libwebp rows into the report.
-- **S.3** Tags that aren't releases, once a Later item: a per-library
-  rule for which of phase 06's tags are releases. Phase 06 lists every
-  tag its **tags** pattern matches, so pre-release tags are listed as
-  versions (`lcms2.19rc1` as 2.19rc1), and an odd tag name can give a
-  version that never existed: lcms2's 2.7 is tagged `lcms2-2.7`, which
-  `lcms{version}` lists as 2.2.7. A release tagged another way is
-  missed: lcms2's 2.11 is tagged only `2.11`. The staleness report
-  counts a tag as a release when its version is digits and dots, which
-  some pre-releases are: libjpeg-turbo tags its betas `x.y.90` and up,
-  so its `3.1.90` beta, tagged 2026-03-27, makes Pillow 12.3.0's
-  libjpeg-turbo 3.1.4.1 read 96 days behind when 3.2.0, the release
-  after it, came out the day before the upload. With the rule, those
-  betas stop counting. The range verifier (6.3) reads the same lists.
-  **← current**
+- **S.3** ✓ Tags that aren't releases, once a Later item: **tags** takes
+  several patterns, tried in order, so lcms2's `lcms2-2.7` lists as 2.7
+  and its bare `2.11` is found, and a new map column, **not_release**,
+  holds a regex for versions that aren't releases. Phase 06 marks each
+  tag `release`, which bumps its lines' `schema_version`, and the
+  staleness report counts only those. libjpeg-turbo's `x.y.90` betas
+  stop counting, so Pillow 12.3.0's libjpeg-turbo 3.1.4.1 reads 1 day
+  behind 3.2.0, not 96 behind the `3.1.90` beta. The range verifier
+  (6.3) reads the same flag. Manual check: rerun a one-package Pillow
+  episode from phase 06.
 
 ### 0. Guardrails
 
@@ -1597,6 +1611,12 @@ again only rows.
   it isn't an independent source; it may list CVEs NVD hasn't matched.
   The library map keeps an **osv** column for it. Adding a source means
   deciding how its CVEs, severities and fixes combine with NVD's.
+
+- **Releases outside digits and dots.** A release is digits separated
+  by dots, so libjpeg-turbo's `2.0.7-esr` and `2.0.8-esr`, releases of
+  its extended-support 2.0 line, aren't counted, and a wheel bundling
+  one isn't compared. A per-library rule for releases spelled another
+  way would fix it.
 
 - **Repo URLs aren't checked for https.** The loader accepts any
   **repo**, so an ssh URL could hang phase 06 on a host-key or
