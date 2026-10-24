@@ -780,9 +780,12 @@ answer.
 
 - The wheel's upload day is phase 01's upload time, in UTC.
 - A release is one of phase 06's tags whose version is digits separated
-  by dots. Other tags, such as `2.19rc1`, aren't counted, so pre-release
-  tags never make a wheel look behind. Versions are ordered as tuples of
-  integers.
+  by dots. Other tags, such as `2.19rc1`, aren't counted, so most
+  pre-release tags never make a wheel look behind. Some projects spell
+  pre-releases in digits and dots, such as libjpeg-turbo's `x.y.90`
+  betas, and these can overstate staleness (see "Tags that aren't
+  releases" under [Later](#later-tbd)). Versions are ordered as tuples
+  of integers.
 - The bundled release is the tag phase 06 lists with the fingerprint
   version, as 7.1 tests versions. An ambiguous version (see
   [Ambiguous versions](#ambiguous-versions)) is read as the newest
@@ -1113,6 +1116,15 @@ packages, to keep reviews short.
   check: rerun the full episode from phase 06; for Pillow 12.3.0, each
   library's newest release at upload matches what its upstream tags
   show by hand, and the report's counts.
+- **S.2** Upstreams outside GitHub, promoted from
+  [Later](#later-tbd): phase 06 clones the eight libraries it skips
+  with reason `not_github`, so the staleness report compares them.
+  Each **tags** pattern is checked against the real repository
+  (FreeType's `VER-{version}` has never been checked), and for each
+  project it is decided whether its official GitHub mirror, where it
+  has one, can stand in for its upstream. It starts with libwebp,
+  whose official mirror is `github.com/webmproject/libwebp`, which
+  brings Pillow's libwebp rows into the report.
   **← current**
 
 ### 0. Guardrails
@@ -1462,22 +1474,17 @@ again only rows.
   reason `not_github`: libtiff (gitlab.com), bzip2 (sourceware.org), aom
   (aomedia.googlesource.com), libwebp (chromium.googlesource.com),
   FreeType (gitlab.freedesktop.org), OpenLDAP (git.openldap.org),
-  PostgreSQL (git.postgresql.org) and dav1d (code.videolan.org). Adding
-  them means checking each **tags** pattern against the real repository
-  (FreeType's `VER-{version}` has never been checked), and deciding
-  whether a project's official GitHub mirror, where it has one, can stand
-  in for its upstream. It has to land before 6.3 and 7.1 for those
-  libraries, libwebp among them: until it does, they get no fixed
-  versions, and 7.1 doesn't compare their versions. The staleness
-  report (S.1) doesn't compare them either, which leaves out several of
-  Pillow's libraries, libwebp, libtiff and FreeType among them;
-  libwebp's official mirror, `github.com/webmproject/libwebp`, is the
-  first candidate. Postponed past the mini-roadmap.
+  PostgreSQL (git.postgresql.org) and dav1d (code.videolan.org). Until
+  they are cloned, they get no fixed versions, and neither 7.1 nor the
+  staleness report compares their versions. Now mini-roadmap item S.2.
 - **Maintained branches in the staleness report.** S.1 counts a newer
   release on any branch, so a library kept on a maintained older line,
   such as OpenSSL 3.0, looks behind once a newer line exists, even
   when it is current on its own line. A per-library rule for which
   lines count would fix it; until then such rows are read by hand.
+- **Time zones in days behind.** A tag's date is in the tag's own time
+  zone, while the upload day is in UTC, so a staleness row's days
+  behind can be off by one.
 - **Staleness through a CVE lens.** On top of the staleness report:
   the high and critical CVEs NVD published between the bundled
   release's date and the wheel's upload day. These name current

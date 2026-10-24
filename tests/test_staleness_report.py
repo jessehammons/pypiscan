@@ -41,9 +41,9 @@ ROWS = [
 AMBIGUOUS = {"lcms": {"2.19.0": ["2.19.1"]}}
 
 
-def ok_06(library: str, *tags: tuple[str, str], schema_version: int = 2) -> Line:
+def ok_06(library: str, *tags: tuple[str, str]) -> Line:
     return {
-        "schema_version": schema_version,
+        "schema_version": 2,
         "library": library,
         "status": "ok",
         "reason": None,
@@ -191,8 +191,15 @@ def test_report_starts_with_counts() -> None:
 def test_old_phase_06_lines_are_never_compared() -> None:
     """An episode from before tag dates says to rerun from phase 06, and
     treats none of the libraries it covers as current."""
-    old = {**PHASE_06, "cur": ok_06("cur", ("1.2.0", "2025-01-01"), schema_version=1)}
-    old["cur"]["tags"] = [{"tag": "v1.2.0", "version": "1.2.0"}]
+    # A schema 1 line, as phase 06 wrote it before tag dates: no "date".
+    cur: Line = {
+        "schema_version": 1,
+        "library": "cur",
+        "status": "ok",
+        "reason": None,
+        "tags": [{"tag": "v1.2.0", "version": "1.2.0"}],
+    }
+    old = {**PHASE_06, "cur": cur}
     out = text(old)
     rerun = "- Phase 06's lines predate tag dates, so their libraries aren't "
     assert f"## Counts\n\n{rerun}compared: rerun from phase 06.\n" in out
