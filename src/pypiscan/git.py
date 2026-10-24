@@ -71,6 +71,17 @@ def clone_or_fetch(repo: str, directory: Path) -> str:
     return "fetch"
 
 
-def tags(directory: Path) -> list[str]:
-    """Every tag in the repository at ``directory``, sorted by name."""
-    return git("-C", str(directory), "tag", "--list").splitlines()
+def tags(directory: Path) -> dict[str, str]:
+    """Every tag in the repository at ``directory``, sorted by name, with its
+    date: the day ``%(creatordate:short)`` gives, the tagger date of an
+    annotated tag or its commit's date for a lightweight one, in that date's
+    own time zone."""
+    # A ref name can't hold a tab, so a tab separates the two fields.
+    out = git(
+        "-C",
+        str(directory),
+        "for-each-ref",
+        "--format=%(refname:strip=2)%09%(creatordate:short)",
+        "refs/tags",
+    )
+    return dict(line.split("\t") for line in out.splitlines())

@@ -57,6 +57,7 @@ from pypiscan.pypi import (
     select_target,
 )
 from pypiscan.sbom_report import report as sbom_report
+from pypiscan.staleness_report import report as staleness_report
 from pypiscan.wheel_inspect import (
     ZIP_ERRORS,
     SkippedMember,
@@ -67,6 +68,8 @@ from pypiscan.wheel_sboms import sboms_wheel
 from pypiscan.wheel_strings import BinaryStrings, strings_wheel
 
 SCHEMA_VERSION = 1
+# Phase 06's lines gained each tag's date (roadmap S.1).
+UPSTREAM_SCHEMA_VERSION = 2
 EPISODE_SCHEMA_VERSION = 2
 MB = 1_000_000
 WHEEL_SIZE_LIMIT = 100 * MB
@@ -125,13 +128,14 @@ class Phase[T: Named]:
     phases clear it and run every library; one that needs an earlier
     phase's result reads that line itself. ``finish``, if set, gets every
     item's lines, this phase's included, once every item is done and before
-    the phase file is finished.
+    the phase file is finished. ``schema_version`` is its lines'.
     """
 
     name: str
     run: Callable[[T, Mapping[str, Line]], Result]
     finish: Callable[[Sequence[str], Lines], None] | None = None
     skip_not_ok: bool = True
+    schema_version: int = SCHEMA_VERSION
 
 
 def resolve_phase(client: HttpClient) -> Phase[Package]:
@@ -457,8 +461,8 @@ def upstream_phase(
             return Result("error", str(exc), data)
         matcher = tag_matcher(library.tags)
         found = [
-            {"tag": name, "version": tag_version(match[1])}
-            for name in names
+            {"tag": name, "version": tag_version(match[1]), "date": date}
+            for name, date in names.items()
             if (match := matcher.fullmatch(name))
         ]
         if not found:
@@ -476,7 +480,13 @@ def upstream_phase(
         recorded["library_map_sha256"] = map_sha256
         write_json(record, recorded)
 
-    return Phase("06-upstream", run, finish, skip_not_ok=False)
+    return Phase(
+        "06-upstream",
+        run,
+        finish,
+        skip_not_ok=False,
+        schema_version=UPSTREAM_SCHEMA_VERSION,
+    )
 
 
 def recognizers_phase(rows: Sequence[MapRow]) -> Phase[Library]:
@@ -712,7 +722,7 @@ def _line[T: Named](
     else:
         result = phase.run(item, earlier)
     return {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": phase.schema_version,
         key: item.name,
         "status": result.status,
         "reason": result.reason,
@@ -843,6 +853,26 @@ def write_sbom_report(
     (episode / "sbom-report.md").write_text(text, encoding="utf-8")
 
 
+def write_staleness_report(
+    episode: Path,
+    packages: Sequence[Package],
+    part_1: Sequence[str],
+    rows: Sequence[MapRow],
+    ambiguous: Ambiguous,
+) -> None:
+    """Rewrite staleness-report.md from part 1's phases (01 to 05), 06 and
+    08; ``part_1`` names part 1's phases."""
+    text = staleness_report(
+        packages,
+        {name: _read_lines(episode / f"{name}.jsonl") for name in part_1},
+        _read_lines(episode / "06-upstream.jsonl", "library"),
+        _read_lines(episode / "08-fingerprint.jsonl"),
+        rows,
+        ambiguous,
+    )
+    (episode / "staleness-report.md").write_text(text, encoding="utf-8")
+
+
 def scan(
     package_list: Path,
     library_map: Path,
@@ -913,6 +943,7 @@ def scan(
             write_fingerprint_report(
                 episode, packages, names, recognizers, rows, ambiguous
             )
+            write_staleness_report(episode, packages, names, rows, ambiguous)
         if (episode / "09-sboms.jsonl").is_file():
             write_sbom_report(episode, packages, names, rows, ambiguous)
         if status:

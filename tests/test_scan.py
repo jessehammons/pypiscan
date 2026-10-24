@@ -12,7 +12,7 @@ from elf_builder import build_elf
 from git_repo import make_repo
 from pypiscan import scan as scan_module
 from pypiscan.cli import main
-from pypiscan.git import GitError, clone_or_fetch
+from pypiscan.git import GitError, clone_or_fetch, git, tags
 from pypiscan.library_map import (
     AMBIGUOUS_COLUMNS,
     COLUMNS,
@@ -767,7 +767,8 @@ def stub_phases(client: object, cache_dir: Path, episode: Path) -> list[Phase]:
             members if package.name == "demo" else {},
         )
         sha256 = hashlib.sha256(wheel.read_bytes()).hexdigest()
-        return Result("ok", None, {"sha256": sha256})
+        uploaded = "2026-01-01T23:30:00-02:00"
+        return Result("ok", None, {"sha256": sha256, "upload_time": uploaded})
 
     def fetch(package: Package, earlier: Mapping[str, Line]) -> Result:
         return Result("ok", None, {"path": str(cache_dir / f"{package.name}.whl")})
@@ -877,7 +878,9 @@ def test_scan_stops_for_the_manual_step(
     assert todo.read_text() == f"{header}\n"
     [libpng] = dirs.lines("06-upstream")
     assert libpng["library"] == "libpng"
-    assert libpng["tags"] == [{"tag": "v1.6.58", "version": "1.6.58"}]
+    assert libpng["schema_version"] == 2
+    tag = {"tag": "v1.6.58", "version": "1.6.58", "date": "1970-01-12"}
+    assert libpng["tags"] == [tag]
     demo, pure, missing = dirs.lines("08-fingerprint")
     path = "demo.libs/libpng16-1a2b3c4d.so.16.58.0"
     assert demo["wheel"] == "demo.whl"
@@ -964,6 +967,22 @@ def test_scan_stops_for_the_manual_step(
     assert run(dirs, "--count", "3") == 0
     assert report.read_text() == text
 
+    # And the staleness report, from phases 01, 05, 06 and 08.
+    report = dirs.episode / "staleness-report.md"
+    text = report.read_text()
+    # The upload time is read in UTC: the next day.
+    assert "## demo 1.0\n\n`demo.whl`, uploaded 2026-01-02\n" in text
+    row = (
+        "| libpng16-1a2b3c4d.so.16.58.0 | libpng | 1.6.58 | library_string |  "
+        "| 1.6.58 (1970-01-12) | 0 | 0 |"
+    )
+    assert row in text
+    assert "| libpng | 1.6.50 | library_string |  | not compared: no release" in text
+    assert "## missing 9.9\n\nerror at 01-resolve: HTTP 404\n" in text
+    report.unlink()
+    assert run(dirs, "--count", "3") == 0
+    assert report.read_text() == text
+
 
 def test_report_shows_why_a_package_stopped_at_phase_02(
     dirs: Dirs, monkeypatch: pytest.MonkeyPatch
@@ -1025,8 +1044,8 @@ def test_phase_06_clones_then_fetches(tmp_path: Path) -> None:
         {
             "repo": str(repo),
             "tags": [
-                {"tag": "v1.3.1", "version": "1.3.1"},
-                {"tag": "v1.3.2-pre", "version": "1.3.2-pre"},
+                {"tag": "v1.3.1", "version": "1.3.1", "date": "1970-01-12"},
+                {"tag": "v1.3.2-pre", "version": "1.3.2-pre", "date": "1970-01-12"},
             ],
         },
     )
@@ -1047,12 +1066,29 @@ def test_phase_06_clones_then_fetches(tmp_path: Path) -> None:
     assert str(result.reason).startswith("git fetch failed: ")
 
 
+def test_tags_have_their_creator_dates(tmp_path: Path) -> None:
+    """A lightweight tag's date is its commit's, an annotated tag's its
+    tagger's, each in its own time zone."""
+    repo = tmp_path / "r"
+    git("init", "--quiet", str(repo))
+    user = ("-c", "user.name=t", "-c", "user.email=t@example.com")
+    # 23:00 at -05:00 is the next day in UTC; the date keeps its own zone.
+    commit = "2024-03-01T23:00:00-05:00"
+    env = {"GIT_AUTHOR_DATE": commit, "GIT_COMMITTER_DATE": commit}
+    git("-C", str(repo), *user, "commit", "-qm", "c", "--allow-empty", env=env)
+    git("-C", str(repo), *user, "tag", "light", env=env)
+    later = {"GIT_COMMITTER_DATE": "2024-05-10T12:00:00+00:00"}
+    git("-C", str(repo), *user, "tag", "-a", "-m", "r", "annotated", env=later)
+    assert tags(repo) == {"annotated": "2024-05-10", "light": "2024-03-01"}
+    assert tags(make_repo(tmp_path / "empty", {})) == {}
+
+
 def test_phase_06_lists_versions_spelled_with_underscores(tmp_path: Path) -> None:
     repo = make_repo(tmp_path / "pg", {"REL_18_6": {}, "REL_18_BETA1": {}})
     result = upstream(tmp_path, Library("postgresql", str(repo), "REL_{version}"))
     assert result.data["tags"] == [
-        {"tag": "REL_18_6", "version": "18.6"},
-        {"tag": "REL_18_BETA1", "version": "18_BETA1"},
+        {"tag": "REL_18_6", "version": "18.6", "date": "1970-01-12"},
+        {"tag": "REL_18_BETA1", "version": "18_BETA1", "date": "1970-01-12"},
     ]
 
 
@@ -1095,7 +1131,7 @@ def test_phase_06_clones_from_github(
 ) -> None:
     cloned: list[str] = []
     monkeypatch.setattr(scan_module, "clone_or_fetch", lambda r, d: cloned.append(r))
-    monkeypatch.setattr(scan_module, "tags", lambda d: ["v1.3.1"])
+    monkeypatch.setattr(scan_module, "tags", lambda d: {"v1.3.1": "2024-01-22"})
     repo = "https://github.com/madler/zlib"
     result = upstream(tmp_path, Library("zlib", repo, "v{version}"), "github.com")
     assert result.status == "ok"
@@ -1529,9 +1565,8 @@ def with_auditwheel_sbom(client: object, cache_dir: Path, episode: Path) -> list
             return result
         sboms = {"demo-1.0.dist-info/sboms/auditwheel.cdx.json": AUDITWHEEL_SBOM}
         wheel = build_wheel(cache_dir / "demo.whl", sboms)
-        return Result(
-            "ok", None, {"sha256": hashlib.sha256(wheel.read_bytes()).hexdigest()}
-        )
+        sha256 = hashlib.sha256(wheel.read_bytes()).hexdigest()
+        return Result("ok", None, result.data | {"sha256": sha256})
 
     return [Phase("01-resolve", resolve), *stubs[1:]]
 
