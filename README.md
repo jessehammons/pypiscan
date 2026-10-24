@@ -1,8 +1,9 @@
 # pypiscan
 
 Inventories the compiled C libraries bundled inside PyPI wheels, identifies
-their versions from the binaries themselves, and matches those versions
-against known CVEs.
+their versions from the binaries themselves, measures how far behind
+upstream those versions were when each wheel was uploaded, and matches
+them against known CVEs.
 
 Status: early development. see the [Roadmap](#roadmap) for
 what is being built and in what order.
@@ -38,6 +39,9 @@ In scope:
   sqlite. The order of additions is set by how often each library appears in
   the scanned wheels (roadmap item 3.7), and a library is added as rows in
   the [library map](#the-library-map).
+- How stale each bundled library was: how far its version lagged
+  upstream's releases when the wheel was uploaded (see
+  [The staleness report](#the-staleness-report)).
 - A curated [CVE table](#the-cve-table) covering high and critical CVEs
   from 2020 onward for those libraries, found through NVD.
 
@@ -617,7 +621,10 @@ Part 2:
    fetch into the existing clone (see [Conventions](#conventions)). The
    clone is needed for fixed versions (phase 10). The line lists the
    release tags the library's **tags** matches, each with the version it
-   names. A library whose **tags** matches no tag is an `error` line, so a
+   names and its date, the day `git for-each-ref` gives as
+   `%(creatordate:short)` (see [The CVE table](#the-cve-table)), which
+   the staleness report reads. A library whose **tags** matches no tag
+   is an `error` line, so a
    wrong repo or a misspelled pattern shows up before phase 10 relies on
    it. Version 1 clones only from GitHub: a library whose repo is elsewhere
    gets a `skipped` line with reason `not_github`, and its map row keeps
@@ -751,6 +758,56 @@ the package list. One row per prefix, library and way of identifying it:
   check the package's build scripts, such as Pillow's
   `.github/dependencies.json`. If the strings fit two upstreams equally
   well, stop and ask the maintainer.
+
+### The staleness report
+
+A scanner sees `pillow 12.3.0`; the staleness report shows how old the
+C libraries inside it were. It is a measurement, not a finding: it
+names no CVE, so it isn't a CVE match (see
+[Data handling and disclosure](#data-handling-and-disclosure)).
+
+Once phases 01, 06 and 08 are finished, every run rewrites
+`staleness-report.md` in the episode from phases 01, 05, 06 and 08, as
+it rewrites the fingerprint report. Phase files don't change, apart
+from the tag dates phase 06 records.
+
+Staleness is measured against the newest release that existed when the
+wheel was uploaded, never today's: a release upstream made afterwards
+doesn't count against the wheel, and a rerun next month gives the same
+answer.
+
+- The wheel's upload day is phase 01's upload time, in UTC.
+- A release is one of phase 06's tags whose version is digits separated
+  by dots. Other tags, such as `2.19rc1`, aren't counted, so pre-release
+  tags never make a wheel look behind. Versions are ordered as tuples of
+  integers.
+- The bundled release is the tag phase 06 lists with the fingerprint
+  version, as 7.1 tests versions. An ambiguous version (see
+  [Ambiguous versions](#ambiguous-versions)) is read as the newest
+  release it may be, so the report can understate staleness, never
+  overstate it, and the row says so.
+- **Newer releases**: releases with a higher version than the bundled
+  one, dated on or before the upload day.
+- **Days behind**: from the earliest newer release's date to the upload
+  day. A wheel with no newer releases is current, at 0 days.
+
+For each package, each `.libs/` file and each library its prefix maps
+to, the report shows the bundled version with its basis and notes as
+the fingerprint report shows them, the newest release at upload with
+its date, the number of newer releases and the days behind. A row whose
+basis is `bare_version` is marked as a hint, as everywhere else.
+
+Any other row is listed as not compared, never as current, with the
+reason: the fingerprint report's reason for having no version;
+`not_github` or another reason phase 06 skipped or failed the library;
+or no release tag for the version, such as OpenBLAS's
+`0.3.34.106.0`. A prefix marked `skip` is listed as skipped. A package
+that wasn't scanned shows the phase where it stopped and that phase's
+reason, as in the fingerprint report.
+
+The report starts with counts: libraries compared, current and behind,
+by basis, and libraries not compared, by reason, so a reader sees how
+much of the substrate the numbers cover.
 
 Rules:
 
@@ -1028,6 +1085,33 @@ Each item is one pull request (see
 implemented in about 20–30 agent turns and reviewed on a phone. Items marked
 *(maintainer input)* need a decision before any code is written. Done items
 are marked ✓.
+
+### Mini-roadmap: staleness of bundled libraries
+
+The CVE work in sections 6 and 7 is paused at 6.3, and the numbered
+roadmap below stays as it is. What is binding for now is the cost of
+each item in Claude usage, not its size in lines, and the 100-wheel
+episodes are costly to run and review. This mini-roadmap goes first. It
+asks a smaller question that the latest wheels can answer with the
+phases already built: how stale were the libraries bundled in them? No
+older releases or Python versions are needed. Time-to-patch and the
+CVE lens stay under [Later](#later-tbd).
+
+Its manual checks start from Pillow, the package that bundles the most
+libraries the map can version, against its `.github/dependencies.json`,
+and review only Pillow's rows and the report's counts, not all 100
+packages, to keep reviews short.
+
+- **S.1** The staleness report, as described in
+  [The staleness report](#the-staleness-report): tag dates in phase
+  06's lines, which bumps their `schema_version`, and
+  `staleness-report.md`. Libraries outside GitHub are not compared
+  (see "Upstreams outside GitHub" under [Later](#later-tbd)). Tests use
+  a small synthetic git repository and hand-built phase lines. Manual
+  check: rerun the full episode from phase 06; for Pillow 12.3.0, each
+  library's newest release at upload matches what its upstream tags
+  show by hand, and the report's counts.
+  **← current**
 
 ### 0. Guardrails
 
@@ -1319,8 +1403,8 @@ again only rows.
   ranges, and flag disagreements. Tests use a small synthetic git
   repository. A CVE report, rewritten every run from phase 10 and the
   table, shows each candidate and whether the table lists it, as a row
-  or a **duplicates** entry, beside the verifier's flags.
-  **← current**
+  or a **duplicates** entry, beside the verifier's flags. *(Paused for
+  the [mini-roadmap](#mini-roadmap-staleness-of-bundled-libraries).)*
 - **6.4** *(maintainer input)* Curation review: resolve flagged rows, one
   library per pull request. Corrections to public advisories are submitted
   upstream. A bug in an original library can also be in a fork's code
@@ -1382,7 +1466,22 @@ again only rows.
   whether a project's official GitHub mirror, where it has one, can stand
   in for its upstream. It has to land before 6.3 and 7.1 for those
   libraries, libwebp among them: until it does, they get no fixed
-  versions, and 7.1 doesn't compare their versions.
+  versions, and 7.1 doesn't compare their versions. The staleness
+  report (S.1) doesn't compare them either, which leaves out several of
+  Pillow's libraries, libwebp, libtiff and FreeType among them;
+  libwebp's official mirror, `github.com/webmproject/libwebp`, is the
+  first candidate. Postponed past the mini-roadmap.
+- **Maintained branches in the staleness report.** S.1 counts a newer
+  release on any branch, so a library kept on a maintained older line,
+  such as OpenSSL 3.0, looks behind once a newer line exists, even
+  when it is current on its own line. A per-library rule for which
+  lines count would fix it; until then such rows are read by hand.
+- **Staleness through a CVE lens.** On top of the staleness report:
+  the high and critical CVEs NVD published between the bundled
+  release's date and the wheel's upload day. These name current
+  releases, so they follow
+  [Data handling and disclosure](#data-handling-and-disclosure), and
+  this is where 6.3, 6.4 and 7.1 come back in.
 - **Time-to-patch.** How long wheels kept shipping an affected version.
   Needs every release of each affected package, with upload times per file
   (depth, where `scan` is breadth). The clock starts when a fixed library
@@ -1510,6 +1609,9 @@ again only rows.
   times aren't biased toward the fast cases.
 - Aggregate statistics say which identification bases they include, such
   as library strings only, or all kinds.
+- The staleness report names no CVE, so it may be published with package
+  names, its bases shown and its not-compared counts included. Once a
+  CVE is attached to a stale library, the rules above apply.
 
 ## Conventions
 
