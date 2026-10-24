@@ -16,3 +16,13 @@
 - [ ] Touches CI, `scripts/check.sh` or tool configuration (`pyproject.toml` tool sections, `.pre-commit-config.yaml`, workflows)
 
 Reason:
+
+## Claude usage
+
+<!-- Session and weekly quota at the start and end of this item, as
+     shown on the usage page. -->
+
+| | Session | Weekly |
+|---|---|---|
+| Start | | |
+| End | | |
