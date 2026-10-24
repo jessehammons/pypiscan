@@ -626,9 +626,7 @@ Part 2:
    the staleness report reads. A library whose **tags** matches no tag
    is an `error` line, so a
    wrong repo or a misspelled pattern shows up before phase 10 relies on
-   it. Version 1 clones only from GitHub: a library whose repo is elsewhere
-   gets a `skipped` line with reason `not_github`, and its map row keeps
-   the real upstream URL.
+   it. A host that can't be reached gives an `error` line too.
 7. `07-recognizers` (per library): build a recognizer from each of the
    library's rows that has a kind (see
    [How versions are identified](#how-versions-are-identified)), and list
@@ -783,9 +781,8 @@ answer.
   by dots. Other tags, such as `2.19rc1`, aren't counted, so most
   pre-release tags never make a wheel look behind. Some projects spell
   pre-releases in digits and dots, such as libjpeg-turbo's `x.y.90`
-  betas, and these can overstate staleness (see "Tags that aren't
-  releases" under [Later](#later-tbd)). Versions are ordered as tuples
-  of integers.
+  betas, and these can overstate staleness (roadmap S.3). Versions are
+  ordered as tuples of integers.
 - The bundled release is the tag phase 06 lists with the fingerprint
   version, as 7.1 tests versions. An ambiguous version (see
   [Ambiguous versions](#ambiguous-versions)) is read as the newest
@@ -804,7 +801,7 @@ basis is `bare_version` is marked as a hint, as everywhere else.
 
 Any other row is listed as not compared, never as current, with the
 reason: the fingerprint report's reason for having no version;
-`not_github` or another reason phase 06 skipped or failed the library;
+the reason phase 06 failed the library;
 or no release tag for the version, such as OpenBLAS's
 `0.3.34.106.0`. A prefix marked `skip` is listed as skipped. A package
 that wasn't scanned shows the phase where it stopped and that phase's
@@ -977,9 +974,8 @@ lightweight tag, in that date's own time zone.
 the row's fixes, unless the row names an introducing commit the tag
 doesn't contain. A version phase 06 lists no tag for, such as OpenBLAS's
 `0.3.31.dev`, and every version of a library phase 06 couldn't clone
-(see "Upstreams outside GitHub" under [Later](#later-tbd)) are listed as
-not compared, never as fixed. An ambiguous version is tested as every
-release it may be.
+are listed as not compared, never as fixed. An ambiguous version is
+tested as every release it may be.
 
 Pre-flight loads the table against the library map. The loader rejects,
 naming the CVE, its library and the field:
@@ -1110,21 +1106,33 @@ packages, to keep reviews short.
 - **S.1** ✓ The staleness report, as described in
   [The staleness report](#the-staleness-report): tag dates in phase
   06's lines, which bumps their `schema_version`, and
-  `staleness-report.md`. Libraries outside GitHub are not compared
-  (see "Upstreams outside GitHub" under [Later](#later-tbd)). Tests use
-  a small synthetic git repository and hand-built phase lines. Manual
-  check: rerun the full episode from phase 06; for Pillow 12.3.0, each
-  library's newest release at upload matches what its upstream tags
-  show by hand, and the report's counts.
-- **S.2** Upstreams outside GitHub, promoted from
-  [Later](#later-tbd): phase 06 clones the eight libraries it skips
-  with reason `not_github`, so the staleness report compares them.
-  Each **tags** pattern is checked against the real repository
-  (FreeType's `VER-{version}` has never been checked), and for each
-  project it is decided whether its official GitHub mirror, where it
-  has one, can stand in for its upstream. It starts with libwebp,
-  whose official mirror is `github.com/webmproject/libwebp`, which
-  brings Pillow's libwebp rows into the report.
+  `staleness-report.md`. Libraries outside GitHub weren't compared
+  until S.2. Tests use a small synthetic git repository and hand-built
+  phase lines. Manual check: rerun the full episode from phase 06; for
+  Pillow 12.3.0, each library's newest release at upload matches what
+  its upstream tags show by hand, and the report's counts.
+- **S.2** ✓ Upstreams outside GitHub, once a Later item: phase 06
+  clones the eight libraries it skipped with reason `not_github`, so
+  the staleness report compares them. Each **tags** pattern is checked
+  against the real repository (FreeType's `VER-{version}` had never
+  been checked), and every library is cloned from its real upstream
+  except PostgreSQL: git.postgresql.org broke off its clone
+  (`fetch-pack: invalid index-pack output`), so its row uses the
+  official mirror, `github.com/postgres/postgres`. It starts with
+  libwebp, which brings Pillow's libwebp rows into the report.
+- **S.3** Tags that aren't releases, once a Later item: a per-library
+  rule for which of phase 06's tags are releases. Phase 06 lists every
+  tag its **tags** pattern matches, so pre-release tags are listed as
+  versions (`lcms2.19rc1` as 2.19rc1), and an odd tag name can give a
+  version that never existed: lcms2's 2.7 is tagged `lcms2-2.7`, which
+  `lcms{version}` lists as 2.2.7. A release tagged another way is
+  missed: lcms2's 2.11 is tagged only `2.11`. The staleness report
+  counts a tag as a release when its version is digits and dots, which
+  some pre-releases are: libjpeg-turbo tags its betas `x.y.90` and up,
+  so its `3.1.90` beta, tagged 2026-03-27, makes Pillow 12.3.0's
+  libjpeg-turbo 3.1.4.1 read 96 days behind when 3.2.0, the release
+  after it, came out the day before the upload. With the rule, those
+  betas stop counting. The range verifier (6.3) reads the same lists.
   **← current**
 
 ### 0. Guardrails
@@ -1470,13 +1478,6 @@ again only rows.
   1.7.6 at its 1.7.7 and 1.8.0 tags. The hand-written zlib detector (2.1)
   becomes map rows once they pass its fixtures (2.2), including telling
   zlib from zlib-ng.
-- **Upstreams outside GitHub.** Phase 06 skips eight libraries with
-  reason `not_github`: libtiff (gitlab.com), bzip2 (sourceware.org), aom
-  (aomedia.googlesource.com), libwebp (chromium.googlesource.com),
-  FreeType (gitlab.freedesktop.org), OpenLDAP (git.openldap.org),
-  PostgreSQL (git.postgresql.org) and dav1d (code.videolan.org). Until
-  they are cloned, they get no fixed versions, and neither 7.1 nor the
-  staleness report compares their versions. Now mini-roadmap item S.2.
 - **Maintained branches in the staleness report.** S.1 counts a newer
   release on any branch, so a library kept on a maintained older line,
   such as OpenSSL 3.0, looks behind once a newer line exists, even
@@ -1527,21 +1528,6 @@ again only rows.
   library-string pattern's literal text contains the library's name,
   ignoring case, which every other current pattern meets; or counting
   such patterns only as hints, like bare versions.
-- **Tags that aren't releases.** Phase 06 lists every tag its
-  **tags** pattern matches, so pre-release tags are listed as
-  versions (`lcms2.19rc1` as 2.19rc1), and an odd tag name can give
-  a version that never existed: lcms2's 2.7 is tagged `lcms2-2.7`,
-  which `lcms{version}` lists as 2.2.7. A release tagged another way
-  is missed: lcms2's 2.11 is tagged only `2.11`. The range verifier
-  (6.3) reads these lists, so before it relies on them, each
-  library's list needs checking against its real releases. The
-  staleness report (S.1) counts a tag as a release when its version is
-  digits and dots, which some pre-releases are: libjpeg-turbo tags its
-  betas `x.y.90` and up, so its `3.1.90` beta, tagged 2026-03-27, makes
-  Pillow 12.3.0's libjpeg-turbo 3.1.4.1 read 96 days behind when 3.2.0,
-  the release after it, came out the day before the upload. A
-  per-library rule for which tags are releases would fix it; until
-  then such rows are read by hand.
 - **Versions that aren't releases.** Some builds stamp a library
   with a version no release has. numpy 2.5.4's OpenBLAS says
   `OpenBLAS 0.3.34.106.0`: scipy-openblas builds OpenBLAS at a
@@ -1612,6 +1598,10 @@ again only rows.
   The library map keeps an **osv** column for it. Adding a source means
   deciding how its CVEs, severities and fixes combine with NVD's.
 
+- **Repo URLs aren't checked for https.** The loader accepts any
+  **repo**, so an ssh URL could hang phase 06 on a host-key or
+  passphrase prompt.
+
 ## Data handling and disclosure
 
 - CVE matches against *current* releases are never written into this
@@ -1638,13 +1628,12 @@ again only rows.
 - Upstream repositories are read with the git command, not dulwich or a
   forge's API. `git tag --contains` answers the range verifier's question
   (6.3) locally, any host works (libtiff is on GitLab, libwebp on
-  googlesource), and nothing needs a token. Version 1 clones only from
-  GitHub, though; see "Upstreams outside GitHub" under
-  [Later](#later-tbd).
+  googlesource), and nothing needs a token.
   - Each repository is a bare, blobless clone in the cache
     (`git clone --bare --filter=blob:none`): every commit and tag, with a
     file's contents fetched the first time it is read. OpenSSL's is about
-    80 MB.
+    80 MB. A host that ignores `--filter` gives a full clone instead, and
+    git warns.
   - A bare clone has no fetch refspec, so later runs fetch with explicit
     ones, `+refs/heads/*:refs/heads/*` and `+refs/tags/*:refs/tags/*`.
     `--mirror` would also copy GitHub's pull-request refs.

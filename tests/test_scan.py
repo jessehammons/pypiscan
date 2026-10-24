@@ -818,7 +818,6 @@ def test_scan_stops_for_the_manual_step(
     dirs: Dirs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(scan_module, "phases", stub_phases)
-    monkeypatch.setattr(scan_module, "UPSTREAM_HOST", None)
     assert run(dirs, "--count", "3") == 3
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -998,7 +997,6 @@ def test_report_shows_why_a_package_stopped_at_phase_02(
         return [stubs[0], Phase("02-fetch", too_large), *stubs[2:]]
 
     monkeypatch.setattr(scan_module, "phases", with_too_large)
-    monkeypatch.setattr(scan_module, "UPSTREAM_HOST", None)
     repo = make_repo(dirs.episode.parent / "libpng", {"v1.6.58": {}})
     png = f"libpng16,libpng,{repo},v{{version}},library_string,"
     png += "libpng version {version},p.c,,none,"
@@ -1013,8 +1011,8 @@ def test_report_shows_why_a_package_stopped_at_phase_02(
 # Phase 06, against synthetic repositories built in tmp_path.
 
 
-def upstream(tmp_path: Path, library: Library, host: str | None = None) -> Result:
-    phase = upstream_phase(tmp_path / "cache", tmp_path, "sha", host)
+def upstream(tmp_path: Path, library: Library) -> Result:
+    phase = upstream_phase(tmp_path / "cache", tmp_path, "sha")
     assert phase.name == "06-upstream"
     return phase.run(library, {})
 
@@ -1114,47 +1112,30 @@ def test_phase_06_failed_clone_is_an_error(tmp_path: Path) -> None:
     [
         "https://gitlab.com/libtiff/libtiff",
         "https://chromium.googlesource.com/webm/libwebp",
-        "http://github.com/madler/zlib",
-        "https://github.com.example/madler/zlib",
-        "git@github.com:madler/zlib.git",
-        "-q",
+        "https://github.com/madler/zlib",
     ],
 )
-def test_phase_06_skips_repos_outside_github(tmp_path: Path, repo: str) -> None:
-    result = upstream(tmp_path, Library("zlib", repo, "v{version}"), "github.com")
-    assert result == Result("skipped", "not_github", {"repo": repo})
-    assert not (tmp_path / "cache" / "upstream").exists()
-
-
-def test_phase_06_clones_from_github(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_phase_06_clones_from_any_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo: str
 ) -> None:
     cloned: list[str] = []
     monkeypatch.setattr(scan_module, "clone_or_fetch", lambda r, d: cloned.append(r))
     monkeypatch.setattr(scan_module, "tags", lambda d: {"v1.3.1": "2024-01-22"})
-    repo = "https://github.com/madler/zlib"
-    result = upstream(tmp_path, Library("zlib", repo, "v{version}"), "github.com")
+    result = upstream(tmp_path, Library("zlib", repo, "v{version}"))
     assert result.status == "ok"
     assert cloned == [repo]
 
 
-def test_scan_clones_only_from_github(
-    dirs: Dirs, capsys: pytest.CaptureFixture[str]
-) -> None:
-    repo = make_repo(dirs.episode.parent / "zlib", {"v1.3.1": {}})
-    dirs.map.write_text(
-        f"{','.join(COLUMNS)}\nlibz,zlib,{repo},v{{version}},,,,,none,\n"
-    )
-    assert scan_module.UPSTREAM_HOST == "github.com"
-    assert run(dirs, "--count", "3") == 0
-    assert "06-upstream: 0 ok, 1 skipped, 0 error" in capsys.readouterr().err
-    [zlib] = dirs.lines("06-upstream")
-    assert (zlib["status"], zlib["reason"], zlib["repo"]) == (
-        "skipped",
-        "not_github",
-        str(repo),
-    )
-    assert not (dirs.cache / "upstream").exists()
+def test_phase_06_clones_from_a_host_that_refuses_filters(tmp_path: Path) -> None:
+    """A server that refuses --filter gives a full clone, not an error."""
+    repo = make_repo(tmp_path / "zlib", {"v1.3.1": {}})
+    git("-C", str(repo), "config", "uploadpack.allowFilter", "false")
+    url = (tmp_path / "zlib").as_uri()
+    result = upstream(tmp_path, Library("zlib", url, "v{version}"))
+    assert result.status == "ok"
+    assert [t["tag"] for t in cast(list[Line], result.data["tags"])] == ["v1.3.1"]
+    clone = tmp_path / "cache" / "upstream" / "zlib.git"
+    assert clone_or_fetch(url, clone) == "fetch"
 
 
 def test_clone_reads_a_leading_dash_as_a_repo(tmp_path: Path) -> None:
@@ -1208,9 +1189,8 @@ def test_stop_between_libraries(tmp_path: Path) -> None:
 
 
 def test_changed_map_after_phase_06_fails_preflight(
-    dirs: Dirs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    dirs: Dirs, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(scan_module, "UPSTREAM_HOST", None)
     repo = make_repo(dirs.episode.parent / "zlib", {"v1.3.1": {}})
     row = f"libz,zlib,{repo},v{{version}},,,,,none,"
     dirs.map.write_text(f"{','.join(COLUMNS)}\n{row}\n")
@@ -1242,11 +1222,10 @@ def test_changed_map_after_phase_06_fails_preflight(
 
 
 def test_version_1_episode_passes_preflight(
-    dirs: Dirs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    dirs: Dirs, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An episode.json from before phase 06 has schema_version 1 and no map
     sha256; pre-flight accepts it, and phase 06 upgrades it to version 2."""
-    monkeypatch.setattr(scan_module, "UPSTREAM_HOST", None)
     repo = make_repo(dirs.episode.parent / "zlib", {"v1.3.1": {}})
     dirs.map.write_text(
         f"{','.join(COLUMNS)}\nlibz,zlib,{repo},v{{version}},,,,,none,\n"
@@ -1269,7 +1248,7 @@ def test_phase_06_writes_episode_json_whole_or_not_at_all(
 ) -> None:
     record = tmp_path / "episode.json"
     record.write_text('{"schema_version": 1}')
-    phase = upstream_phase(tmp_path / "cache", tmp_path, "sha", None)
+    phase = upstream_phase(tmp_path / "cache", tmp_path, "sha")
     assert phase.finish is not None
     write_text = Path.write_text
 
@@ -1297,7 +1276,7 @@ def test_phase_06_writes_episode_json_whole_or_not_at_all(
 def test_per_library_phases_run_every_library(tmp_path: Path) -> None:
     """A per-library phase runs a library whatever its earlier lines say;
     a per-package phase still skips one whose previous line isn't ok."""
-    first = {"zlib": Result("skipped", "not_github"), "xz": Result("error", "x")}
+    first = {"zlib": Result("skipped", "x"), "xz": Result("error", "x")}
     ran: list[str] = []
 
     def go(library: Library, earlier: Mapping[str, Line]) -> Result:
@@ -1405,25 +1384,10 @@ def test_phase_07_build_path_has_no_identity_file(tmp_path: Path) -> None:
     ]
 
 
-@pytest.mark.parametrize(
-    ("host", "repo", "status"),
-    [
-        ("github.com", "https://gitlab.com/libtiff/libtiff", "skipped"),
-        (None, "missing", "error"),
-    ],
-    ids=["not-github", "clone-fails"],
-)
 def test_phase_07_runs_whatever_phase_06_said(
-    dirs: Dirs,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    host: str | None,
-    repo: str,
-    status: str,
+    dirs: Dirs, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(scan_module, "UPSTREAM_HOST", host)
-    if host is None:
-        repo = str(dirs.episode.parent / repo)
+    repo = str(dirs.episode.parent / "missing")
     row = f"libtiff,libtiff,{repo},v{{version}},library_string,"
     row += '"LIBTIFF, Version {version}",libtiff/tiffvers.h.in,,none,'
     dirs.map.write_text(f"{','.join(COLUMNS)}\n{row}\n")
@@ -1431,7 +1395,7 @@ def test_phase_07_runs_whatever_phase_06_said(
     err = capsys.readouterr().err
     assert "07-recognizers: 1 ok, 0 skipped, 0 error" in err
     [upstream_line] = dirs.lines("06-upstream")
-    assert upstream_line["status"] == status
+    assert upstream_line["status"] == "error"
     [line] = dirs.lines("07-recognizers")
     assert line == {
         "schema_version": 1,
@@ -1513,7 +1477,6 @@ def test_editing_the_ambiguous_list_rewrites_the_report(
     dirs: Dirs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(scan_module, "phases", stub_phases)
-    monkeypatch.setattr(scan_module, "UPSTREAM_HOST", None)
     repo = make_repo(dirs.episode.parent / "libpng", {"v1.6.58": {}})
     png = f"libpng16,libpng,{repo},v{{version}},library_string,"
     png += "libpng version {version},p.c,,none,"
@@ -1575,7 +1538,6 @@ def test_sbom_report_is_rewritten_once_phase_09_is_finished(
     dirs: Dirs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(scan_module, "phases", with_auditwheel_sbom)
-    monkeypatch.setattr(scan_module, "UPSTREAM_HOST", None)
     repo = make_repo(dirs.episode.parent / "libpng", {"v1.6.58": {}})
     png = f"libpng16,libpng,{repo},v{{version}},library_string,"
     png += "libpng version {version},p.c,,none,"

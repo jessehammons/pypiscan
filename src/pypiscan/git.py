@@ -2,7 +2,8 @@
 
 See README "Conventions". git runs by the absolute path ``shutil.which``
 returns, with an argument list and never a shell, so this module alone
-ignores ruff's S603. Each upstream repository is a bare, blobless clone; a
+ignores ruff's S603. Each upstream repository is a bare, blobless clone (a
+host that ignores ``--filter`` gives a full one, and git warns); a
 later run fetches into it with explicit refspecs, since a bare clone has
 none.
 """

@@ -18,7 +18,6 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Protocol, TextIO, cast
-from urllib.parse import urlsplit
 
 from elftools.common.exceptions import ELFError
 
@@ -79,8 +78,6 @@ STATUSES = ("ok", "skipped", "error")
 EXIT_PREFLIGHT = 2
 EXIT_MANUAL_STEP = 3
 EXIT_INTERRUPTED = 130
-# Version 1 clones only from GitHub; see README "Conventions".
-UPSTREAM_HOST = "github.com"
 PHASE_FILE = re.compile(r"(\d\d)-[a-z0-9-]+\.jsonl(\.partial)?")
 
 Line = dict[str, object]
@@ -431,27 +428,16 @@ def upstream_libraries(rows: Sequence[MapRow]) -> list[Library]:
     return list(found.values())
 
 
-def on_host(repo: str, host: str) -> bool:
-    """Whether ``repo`` is an https URL on ``host``."""
-    url = urlsplit(repo)
-    return url.scheme == "https" and url.hostname == host
-
-
-def upstream_phase(
-    cache_dir: Path, episode: Path, map_sha256: str, host: str | None
-) -> Phase[Library]:
+def upstream_phase(cache_dir: Path, episode: Path, map_sha256: str) -> Phase[Library]:
     """Phase 06: clone or fetch each library, and list the tags its tags matches.
 
-    With ``host`` set, a repository that isn't an https URL on it gets a
-    ``skipped`` line with reason ``not_github`` and is never cloned; tests
-    pass ``None`` to clone local repositories. When every library is done,
-    records the map's sha256 in episode.json for pre-flight check 5.
+    Every library is cloned from its map row's repo, on any host. When every
+    library is done, records the map's sha256 in episode.json for pre-flight
+    check 5.
     """
 
     def run(library: Library, earlier: Mapping[str, Line]) -> Result:
         data: Line = {"repo": library.repo}
-        if host is not None and not on_host(library.repo, host):
-            return Result("skipped", "not_github", data)
         directory = cache_dir / "upstream" / f"{library.name}.git"
         directory.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -521,7 +507,7 @@ def library_phases(
     cache_dir: Path, episode: Path, map_sha256: str, rows: Sequence[MapRow]
 ) -> list[Phase[Library]]:
     return [
-        upstream_phase(cache_dir, episode, map_sha256, UPSTREAM_HOST),
+        upstream_phase(cache_dir, episode, map_sha256),
         recognizers_phase(rows),
     ]
 
