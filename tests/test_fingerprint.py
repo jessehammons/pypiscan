@@ -15,6 +15,7 @@ from pypiscan.fingerprint import (
     Pattern,
     fingerprint_binary,
     fingerprint_wheel,
+    linkage_of,
 )
 from pypiscan.wheel_inspect import WheelError
 
@@ -62,6 +63,7 @@ def test_classic_zlib_contains() -> None:
         "sha256": hashlib.sha256(elf).hexdigest(),
         "library": "zlib",
         "relation": "contains",
+        "linkage": "static_lib",
         "basis": "library_string",
         "version": "1.3.2",
         "conflict": False,
@@ -82,9 +84,10 @@ def test_classic_zlib_contains() -> None:
     }
 
 
-def test_schema_version_is_3() -> None:
-    # 2 added basis; 3 added the version_function_machine_code kind.
-    assert SCHEMA_VERSION == 3
+def test_schema_version_is_4() -> None:
+    # 2 added basis; 3 added the version_function_machine_code kind; 4
+    # added linkage.
+    assert SCHEMA_VERSION == 4
 
 
 def test_four_part_version_kept_exactly() -> None:
@@ -270,6 +273,51 @@ def test_fingerprint_wheel_reports_each_binary(tmp_path: Path) -> None:
         ("lxmlish/objectify.so", "zlib", "1.3.2"),
     ]
     assert {r["wheel"] for r in records} == {whl.name}
+
+
+def test_linkage_is_by_location(tmp_path: Path) -> None:
+    whl = build_wheel(
+        tmp_path / "pkg-1.0-cp312-cp312-manylinux_2_28_x86_64.whl",
+        {
+            "pkg.libs/libz-1a2b3c4d.so.1": build_elf(None, rodata=ZLIB_132),
+            "pkg/_ext.so": build_elf(None, rodata=ZLIB_132),
+            # Not a top-level `.libs/` directory.
+            "pkg/sub.libs/libz.so.1": build_elf(None, rodata=ZLIB_132),
+        },
+    )
+    records = fingerprint_wheel(whl, DETECTORS)
+    assert [(r["path"], r["linkage"]) for r in records] == [
+        ("pkg.libs/libz-1a2b3c4d.so.1", "shared_lib"),
+        ("pkg/_ext.so", "static_lib"),
+        ("pkg/sub.libs/libz.so.1", "static_lib"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("record", "linkage"),
+    [
+        ({"schema_version": 4, "linkage": "shared_lib"}, "shared_lib"),
+        ({"schema_version": 4, "linkage": "static_lib"}, "static_lib"),
+        # Before linkage, phase 08 wrote every record, all from `.libs/`.
+        ({"schema_version": 3}, "shared_lib"),
+    ],
+)
+def test_linkage_of(record: dict[str, object], linkage: str) -> None:
+    assert linkage_of(record) == linkage
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"schema_version": 4, "path": "a.so", "linkage": "executable"},
+        {"schema_version": 4, "path": "a.so"},
+        {"schema_version": 4, "path": "a.so", "linkage": None},
+        {"schema_version": 3, "path": "a.so", "linkage": "executable"},
+    ],
+)
+def test_unknown_linkage_fails(record: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match=r"unknown linkage .* in 'a\.so'; expected"):
+        linkage_of(record)
 
 
 def test_fingerprint_wheel_errors(tmp_path: Path) -> None:

@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import cast
 
+from pypiscan.fingerprint import linkage_of
 from pypiscan.fingerprint_report import (
     FINGERPRINT,
     NONE,
@@ -213,7 +214,7 @@ def _section(
     contains = {
         (str(r["path"]), str(r["library"])): r
         for r in cast(list[Line], fingerprints["records"])
-        if r["relation"] == "contains"
+        if r["relation"] == "contains" and linkage_of(r) == "shared_lib"
     }
     out += ["", FILES] if found else ["", "No .libs/ files."]
     for each in found:

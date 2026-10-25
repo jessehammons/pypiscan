@@ -13,12 +13,12 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, cast
 
 from pypiscan.elf_sections import Sections, section_at, sections
-from pypiscan.wheel_inspect import iter_elf_members
+from pypiscan.wheel_inspect import in_libs_dir, iter_elf_members
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 Kind = Literal[
     "library_string",
@@ -43,6 +43,13 @@ VERSION_KINDS: tuple[Basis, ...] = (
     "bare_version",
 )
 Relation = Literal["contains", "compiled_against"]
+# Where the library was found: in a `.libs/` file through its prefix, or in
+# a binary outside `.libs/`. A closed set; readers fail on any other value.
+Linkage = Literal["shared_lib", "static_lib"]
+LINKAGES: tuple[Linkage, ...] = ("shared_lib", "static_lib")
+# Records before this schema_version have no linkage; phase 08 wrote them
+# all, from `.libs/` files.
+LINKAGE_SCHEMA = 4
 
 
 @dataclass(frozen=True)
@@ -107,6 +114,7 @@ class FingerprintRecord(TypedDict):
     sha256: str
     library: str
     relation: Relation
+    linkage: Linkage
     basis: Basis
     version: str | None
     conflict: bool
@@ -179,8 +187,28 @@ def resolve(matches: list[Match]) -> tuple[Relation, Basis, str | None, bool] | 
     return None
 
 
+def linkage_of(record: Mapping[str, object]) -> Linkage:
+    """A record's linkage. Raises ``ValueError`` for a value outside
+    ``LINKAGES``, or a missing one in a record from schema_version 4 on."""
+    if "linkage" not in record and cast(int, record["schema_version"]) < LINKAGE_SCHEMA:
+        return "shared_lib"
+    value = record.get("linkage")
+    for known in LINKAGES:
+        if value == known:
+            return known
+    raise ValueError(
+        f"unknown linkage {value!r} in {record.get('path')!r}; "
+        f"expected one of {', '.join(LINKAGES)}"
+    )
+
+
 def record(
-    wheel_name: str, path: str, sha256: str, library: str, matches: list[Match]
+    wheel_name: str,
+    path: str,
+    sha256: str,
+    library: str,
+    matches: list[Match],
+    linkage: Linkage,
 ) -> FingerprintRecord | None:
     """The record for one binary and library, or ``None`` if it has none."""
     result = resolve(matches)
@@ -194,6 +222,7 @@ def record(
         "sha256": sha256,
         "library": library,
         "relation": relation,
+        "linkage": linkage,
         "basis": basis,
         "version": version,
         "conflict": conflict,
@@ -225,13 +254,16 @@ def binary_matches(
 def fingerprint_binary(
     detectors: Iterable[Detector], wheel_name: str, path: str, data: bytes
 ) -> list[FingerprintRecord]:
-    """Return one record per library detected in one binary."""
+    """Return one record per library detected in one binary. Its linkage
+    is by location, as in scan: ``shared_lib`` in a `.libs/` directory,
+    ``static_lib`` elsewhere."""
     sha256 = hashlib.sha256(data).hexdigest()
+    linkage: Linkage = "shared_lib" if in_libs_dir(path) else "static_lib"
     return [
         found
         for by_library in binary_matches(detectors, path, data)
         for library, matches in by_library.items()
-        if (found := record(wheel_name, path, sha256, library, matches))
+        if (found := record(wheel_name, path, sha256, library, matches, linkage))
     ]
 
 

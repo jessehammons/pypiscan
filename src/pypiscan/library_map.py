@@ -17,6 +17,11 @@ in NVD, joined by ``:`` and separated by single spaces, or ``none``
 mapped row, is how many leading components of a version name its line of
 releases, or ``single_line``; ``load_line_eol`` reads when each line reached
 its end of life.
+``static_lib_detection`` (roadmap T.3) is ``pattern`` on a ``library_string``
+or ``build_path`` row whose matches outside `.libs/` become static_lib
+records, ``detector`` on a row with no prefix and no kind whose library a
+hand-written detector finds, or empty. Only a ``detector`` row has an empty
+prefix, and a library's rows agree on being one.
 ``load_ambiguous_versions`` reads the list of ambiguous versions against the
 map's rows.
 """
@@ -29,6 +34,8 @@ from datetime import date
 from pathlib import Path
 from typing import Literal
 
+from pypiscan.detectors import DETECTOR_LIBRARIES
+
 COLUMNS = [
     "prefix",
     "library",
@@ -40,6 +47,7 @@ COLUMNS = [
     "pattern",
     "identity_file",
     "identity",
+    "static_lib_detection",
     "cpe",
     "osv",
 ]
@@ -50,6 +58,12 @@ SKIP = "skip"
 SHARED = ("repo", "tags", "not_release", "line", "cpe", "osv")
 # The line of a library that maintains one line of releases.
 SINGLE_LINE = "single_line"
+# static_lib_detection: the row's pattern, or the library's hand-written
+# detector, shows that a binary outside `.libs/` contains the library.
+PATTERN = "pattern"
+DETECTOR = "detector"
+# The kinds whose pattern can qualify for static_lib detection.
+STATIC_KINDS = ("library_string", "build_path")
 
 PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
 # A digit followed by letters, digits, ".", "+", "~" or "-".
@@ -87,6 +101,7 @@ class MapRow:
     # Last, with defaults, so rows built in code needn't name them.
     not_release: str = ""
     line: str = SINGLE_LINE
+    static_lib_detection: str = ""
 
 
 def _split(column: str, text: str, allowed: set[str]) -> list[str]:
@@ -259,9 +274,11 @@ def _cpe_problem(cpe: str) -> str | None:
 
 def _row_problem(row: dict[str, str]) -> str | None:
     """Why ``row`` doesn't fit its kind, or ``None`` if it's valid."""
-    missing = [name for name in ("prefix", "library") if not row[name]]
-    if missing:
-        return f"{', '.join(missing)} is empty"
+    detection = row["static_lib_detection"]
+    if not row["prefix"] and detection != DETECTOR:
+        return f"prefix is empty, which only a {DETECTOR} row can be"
+    if not row["library"]:
+        return "library is empty"
     if row["library"] == SKIP:
         filled = [name for name in COLUMNS[2:] if row[name]]
         if filled:
@@ -290,6 +307,17 @@ def _row_problem(row: dict[str, str]) -> str | None:
     except re.error as exc:
         return f"not_release {row['not_release']!r} isn't a regex: {exc}"
     kind = row["kind"]
+    if detection not in ("", PATTERN, DETECTOR):
+        return (
+            f"unknown static_lib_detection {detection!r}; expected {PATTERN}, "
+            f"{DETECTOR} or empty"
+        )
+    if detection == PATTERN and kind not in STATIC_KINDS:
+        return f"a {PATTERN} row is a {' or '.join(STATIC_KINDS)} row"
+    if detection == DETECTOR and (kind or row["prefix"]):
+        return f"a {DETECTOR} row has no prefix and no kind"
+    if detection == DETECTOR and row["library"] not in DETECTOR_LIBRARIES:
+        return f"library {row['library']!r} has no hand-written detector"
     if not kind:
         filled = [n for n in ("pattern", "identity_file") if row[n]]
         if filled:
@@ -338,6 +366,10 @@ def _clash(row: MapRow, earlier: list[tuple[int, MapRow]]) -> str | None:
                 f"with no kind, which must be its only row (see line {line})"
             )
         differ = [n for n in SHARED if getattr(other, n) != getattr(row, n)]
+        if (other.static_lib_detection == DETECTOR) != (
+            row.static_lib_detection == DETECTOR
+        ):
+            differ.append(f"static_lib_detection ({DETECTOR} or not)")
         if differ:
             return (
                 f"library {row.library!r} has another {', '.join(differ)} "

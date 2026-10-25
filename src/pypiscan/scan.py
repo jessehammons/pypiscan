@@ -30,7 +30,10 @@ from pypiscan.fetch import download
 from pypiscan.fingerprint_report import report as fingerprint_report
 from pypiscan.git import GitError, clone_or_fetch, tags
 from pypiscan.library_map import (
+    DETECTOR,
+    PATTERN,
     SKIP,
+    STATIC_KINDS,
     VERSION_FUNCTION,
     Ambiguous,
     LibraryMapError,
@@ -76,7 +79,8 @@ SCHEMA_VERSION = 1
 # Phase 06's lines gained each tag's date (roadmap S.1), then whether it is
 # a release (S.3).
 UPSTREAM_SCHEMA_VERSION = 3
-STATIC_SCHEMA_VERSION = 1
+# Phase 10's lines gained static_lib records (roadmap T.3).
+STATIC_SCHEMA_VERSION = 2
 EPISODE_SCHEMA_VERSION = 2
 MB = 1_000_000
 WHEEL_SIZE_LIMIT = 100 * MB
@@ -396,7 +400,12 @@ def fingerprint_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
                 ).items():
                     matches.sort(key=lambda m: cast(int, m.offset))
                     record = fingerprint.record(
-                        wheel, binary["path"], binary["sha256"], library, matches
+                        wheel,
+                        binary["path"],
+                        binary["sha256"],
+                        library,
+                        matches,
+                        "shared_lib",
                     )
                     if record is not None:
                         records.append(record)
@@ -432,10 +441,6 @@ def sboms_phase() -> Phase[Package]:
     return Phase("09-sboms", run)
 
 
-# The kinds phase 10 runs: both rest on a string, not on a `.libs/` file.
-STATIC_KINDS = ("library_string", "build_path")
-
-
 def _parse_elf(path: str, data: bytes) -> None:
     """Raise ``MemberError`` if pyelftools can't parse ``data``'s sections."""
     try:
@@ -467,9 +472,12 @@ def _candidate(
     }
 
 
-def static_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
+def static_phase(
+    recognizer_lines: Sequence[Line], rows: Sequence[MapRow]
+) -> Phase[Package]:
     """Phase 10: unconfirmed candidates for statically linked libraries in
-    each ELF binary in phase 04's records outside phase 05's `.libs/` files.
+    each ELF binary in phase 04's records outside phase 05's `.libs/` files,
+    and ``static_lib`` fingerprint records from those that qualify.
 
     Candidates come from the ``library_string`` and ``build_path``
     recognizers in phase 07's lines, under any prefix and each run once,
@@ -478,26 +486,63 @@ def static_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
     basis with that string's own version, over the binary's bytes read from
     the wheel at phase 02's path. Binaries follow phase 04's order,
     candidates their offset.
+
+    A recognizer whose map row's static_lib_detection is ``pattern``, and a
+    detector one of whose libraries has a ``detector`` row, also give
+    matches for ``fingerprint.record``; its ``contains`` records are kept.
     """
     unique: dict[tuple[str, str, str], tuple[Recognizer, re.Pattern[str]]] = {}
     for found in compile_recognizers(recognizer_lines).values():
         for r in found:
             if r.kind in STATIC_KINDS and isinstance(r.compiled, re.Pattern):
                 unique.setdefault((r.library, r.kind, r.pattern), (r, r.compiled))
+    qualified = {
+        (row.library, row.kind, row.pattern)
+        for row in rows
+        if row.static_lib_detection == PATTERN
+    }
+    detected = {row.library for row in rows if row.static_lib_detection == DETECTOR}
 
-    def candidates(path: str, binary: BinaryStrings, data: bytes) -> list[Line]:
-        found = [
-            _candidate(
-                r.library, m[1], r.kind, s["text"], s["offset"], s["section"], r.pattern
-            )
-            for r, compiled in unique.values()
-            for s in binary["strings"]
-            if usable(s) and (m := compiled.fullmatch(s["text"]))
-        ]
-        # Each string of a contains result's basis, with its own version;
-        # a string the derivative rule reattributes has none.
-        for by_library in fingerprint.binary_matches(DETECTORS, path, data):
-            for matches in by_library.values():
+    def scan_binary(
+        wheel: str, binary: BinaryStrings, data: bytes
+    ) -> tuple[list[Line], list[object]]:
+        """A binary's candidates, and its static_lib records."""
+        path = binary["path"]
+        found: list[Line] = []
+        evidence: dict[str, list[fingerprint.Match]] = {}
+        for key, (r, compiled) in unique.items():
+            for s in binary["strings"]:
+                if not (usable(s) and (m := compiled.fullmatch(s["text"]))):
+                    continue
+                found.append(
+                    _candidate(
+                        r.library,
+                        m[1],
+                        r.kind,
+                        s["text"],
+                        s["offset"],
+                        s["section"],
+                        r.pattern,
+                    )
+                )
+                if key in qualified:
+                    evidence.setdefault(r.library, []).append(
+                        fingerprint.Match(
+                            r.library,
+                            r.kind,
+                            s["text"],
+                            s["offset"],
+                            m[1],
+                            s["section"],
+                        )
+                    )
+        by_detector = fingerprint.binary_matches(DETECTORS, path, data)
+        for detector, by_library in zip(DETECTORS, by_detector, strict=True):
+            for library, matches in by_library.items():
+                if detected & {p.library for p in detector.patterns}:
+                    evidence.setdefault(library, []).extend(matches)
+                # Each string of a contains result's basis, with its own
+                # version; a string the derivative rule reattributes has none.
                 result = fingerprint.resolve(matches)
                 if result is None or result[0] != "contains":
                     continue
@@ -509,7 +554,15 @@ def static_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
                     if m.kind == result[1]
                 ]
         found.sort(key=lambda c: (cast(int, c["offset"]), str(c["library"])))
-        return found
+        records: list[object] = []
+        for library, matches in sorted(evidence.items()):
+            matches.sort(key=lambda m: (m.offset is None, m.offset or 0))
+            record = fingerprint.record(
+                wheel, path, binary["sha256"], library, matches, "static_lib"
+            )
+            if record is not None and record["relation"] == "contains":
+                records.append(record)
+        return found, records
 
     def run(package: Package, earlier: Mapping[str, Line]) -> Result:
         strings_line = earlier["04-strings"]
@@ -526,11 +579,13 @@ def static_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
                 # One member at a time, so memory holds one binary.
                 data = read_members(fetched, {path: sha256})[path]
                 _parse_elf(path, data)
+                found, records = scan_binary(wheel, binary, data)
                 binaries.append(
                     {
                         "path": path,
                         "sha256": sha256,
-                        "candidates": candidates(path, binary, data),
+                        "candidates": found,
+                        "fingerprints": records,
                     }
                 )
         except MemberError as exc:
@@ -956,7 +1011,7 @@ def manual_step(episode: Path, rows: Sequence[MapRow], err: TextIO) -> int:
     lines = _read_lines(episode / "05-libraries.jsonl")
     names = list(lines)
     found = {name: {"05-libraries": line} for name, line in lines.items()}
-    missing = todo(names, found, {row.prefix for row in rows})
+    missing = todo(names, found, {row.prefix for row in rows if row.prefix})
     write_todo(episode / "library-map-todo.csv", missing)
     if not missing:
         return 0
@@ -1019,13 +1074,15 @@ def write_staleness_report(
     ambiguous: Ambiguous,
     line_eol: LineEol,
 ) -> None:
-    """Rewrite staleness-report.md from part 1's phases (01 to 05), 06 and
-    08; ``part_1`` names part 1's phases."""
+    """Rewrite staleness-report.md from part 1's phases (01 to 05), 06, 08
+    and, once it is finished, 10; ``part_1`` names part 1's phases."""
+    static = episode / "10-static.jsonl"
     text = staleness_report(
         packages,
         {name: _read_lines(episode / f"{name}.jsonl") for name in part_1},
         _read_lines(episode / "06-upstream.jsonl", "library"),
         _read_lines(episode / "08-fingerprint.jsonl"),
+        _read_lines(static) if static.is_file() else None,
         rows,
         ambiguous,
         line_eol,
@@ -1128,7 +1185,7 @@ def scan(
         part_3 = [
             fingerprint_phase(recognizer_lines),
             sboms_phase(),
-            static_phase(recognizer_lines),
+            static_phase(recognizer_lines, rows),
         ]
         names = [phase.name for phase in part_1]
         status = run_phases(

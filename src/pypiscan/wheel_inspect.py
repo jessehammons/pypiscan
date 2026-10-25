@@ -83,7 +83,7 @@ def _needed(data: bytes) -> list[str] | None:
         return None
 
 
-def _in_libs_dir(member: str) -> bool:
+def in_libs_dir(member: str) -> bool:
     top, sep, _ = member.partition("/")
     return bool(sep) and top.endswith(".libs")
 
@@ -136,7 +136,7 @@ def inspect_wheel(
             "path": path,
             "size": len(data),
             "sha256": hashlib.sha256(data).hexdigest(),
-            "in_libs_dir": _in_libs_dir(path),
+            "in_libs_dir": in_libs_dir(path),
             "needed": _needed(data),
         }
         for path, data in iter_elf_members(wheel, max_member_size, skipped)

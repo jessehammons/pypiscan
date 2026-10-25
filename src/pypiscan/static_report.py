@@ -58,6 +58,17 @@ def _conflicts(candidates: Sequence[Line]) -> set[str]:
     return {library for library, found in versions.items() if len(found) > 1}
 
 
+def _recorded(binary: Line) -> set[tuple[str, object, str]]:
+    """Library, offset and text of each string in the evidence of the
+    binary's static_lib records; a line from before them has none."""
+    records = cast(list[Line], binary.get("fingerprints") or [])
+    return {
+        (str(r["library"]), e["offset"], str(e["text"]))
+        for r in records
+        for e in cast(list[Line], r["evidence"])
+    }
+
+
 def _note(
     candidate: Line,
     headers: set[tuple[str, str, str]],
@@ -144,6 +155,7 @@ def report(
     by_library: Counter[str] = Counter()
     by_kind: Counter[str] = Counter()
     risky = 0
+    became = 0
     sections: list[str] = []
     for package in packages:
         line = static[package.name]
@@ -157,11 +169,14 @@ def report(
         for binary in found:
             listed = cast(list[Line], binary["candidates"])
             conflicts = _conflicts(listed)
+            recorded = _recorded(binary)
             for candidate in listed:
                 note = _note(candidate, headers, ambiguous, conflicts)
                 by_library[str(candidate["library"])] += 1
                 by_kind[str(candidate["kind"])] += 1
                 risky += HEADER_RISK in note
+                key = (str(candidate["library"]), candidate["offset"])
+                became += (*key, str(candidate["text"])) in recorded
                 version = candidate["version"]
                 table.append(
                     row(
@@ -197,6 +212,7 @@ def report(
         f"- {count(sum(by_library.values()), 'candidate')}: by library, "
         f"{tally(by_library)}; by kind, {tally(by_kind)}",
         f"- {count(risky, 'candidate')} marked {HEADER_RISK}",
+        f"- {count(became, 'candidate')} that became static_lib records",
         f"- {count(len(templates), 'distinct template')}",
         "",
         "## Candidates",

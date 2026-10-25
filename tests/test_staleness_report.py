@@ -91,6 +91,8 @@ def record(prefix: str, library: str, version: str | None, basis: str) -> Line:
         "path": path(prefix),
         "library": library,
         "relation": "contains",
+        "schema_version": 4,
+        "linkage": "shared_lib",
         "version": version,
         "basis": basis,
         "conflict": False,
@@ -140,7 +142,7 @@ PHASE_08: dict[str, Line] = {
 
 
 def text(phase_06: dict[str, Line] = PHASE_06) -> str:
-    return report(PACKAGES, PART_1, phase_06, PHASE_08, ROWS, AMBIGUOUS, {})
+    return report(PACKAGES, PART_1, phase_06, PHASE_08, None, ROWS, AMBIGUOUS, {})
 
 
 # The line columns of a single-line library repeat the overall values.
@@ -152,7 +154,11 @@ BLANK = ("—",) * 6
 
 
 def table_row(prefix: str, library: str, *cells: str) -> str:
-    return f"| {prefix}-1a2b3c4d.so.1 | {library} | " + " | ".join(cells) + " |"
+    return (
+        f"| {prefix}-1a2b3c4d.so.1 | shared_lib | {library} | "
+        + " | ".join(cells)
+        + " |"
+    )
 
 
 def test_report_covers_every_case() -> None:
@@ -194,6 +200,8 @@ def test_report_covers_every_case() -> None:
 def test_report_starts_with_counts() -> None:
     counts = (
         "## Counts\n\n"
+        "- Static rows are absent: phase 10 isn't finished.\n\n"
+        "### shared_lib\n\n"
         "- Compared: current 2 (bare_version 1, library_string 1); behind 2 "
         "(build_path 1, version_function_machine_code 1). By basis.\n"
         "- On the bundled version's line: current 2 (bare_version 1, "
@@ -299,7 +307,7 @@ def test_a_package_without_libs_and_a_library_missing_from_phase_06() -> None:
         "bare": {"status": "ok", "wheel": "bare.whl", "records": []},
     }
     packages = [Package("pkg", "1.0"), Package("bare", "1.0")]
-    out = report(packages, part_1, {}, phase_08, ROWS, {}, {})
+    out = report(packages, part_1, {}, phase_08, None, ROWS, {}, {})
     assert "not compared: not in phase 06" in out
     assert "## bare 1.0\n\n`bare.whl`, uploaded 2025-06-14\n\nNo .libs/ files." in out
 
@@ -429,7 +437,9 @@ def test_report_counts_line_status_and_lag_on_line() -> None:
                      *SSL_TAGS),
     }  # fmt: skip
     eols = {"ssl": {"3.0": "2026-09-07", "2.0": "2021-01-01"}}
-    out = report([Package("pkg", "1.0")], part_1, upstream, phase_08, rows, {}, eols)
+    out = report(
+        [Package("pkg", "1.0")], part_1, upstream, phase_08, None, rows, {}, eols
+    )
     assert (
         "- On the bundled version's line: current 3 (library_string 3); "
         "behind 1 (library_string 1). By basis.\n"
@@ -441,3 +451,131 @@ def test_report_counts_line_status_and_lag_on_line() -> None:
     assert table_row("libssl", "ssl", "3.0.0", "library_string", "",
                      "3.1.2 (2023-08-01)", "3", "171", "3.0", "maintained",
                      "3.0.9 (2023-05-30)", "94") in out  # fmt: skip
+
+
+# Static rows (roadmap T.3).
+
+
+def static_record(library: str, version: str | None, conflict: bool = False) -> Line:
+    return {
+        "schema_version": 4,
+        "library": library,
+        "relation": "contains",
+        "linkage": "static_lib",
+        "version": version,
+        "basis": "library_string",
+        "conflict": conflict,
+    }
+
+
+def static_line(*binaries: tuple[str, list[Line]]) -> Line:
+    return {
+        "schema_version": 2,
+        "status": "ok",
+        "reason": None,
+        "binaries": [{"path": p, "fingerprints": r} for p, r in binaries],
+    }
+
+
+ZLIB_06 = ok_06("zlib", ("1.3.1", "2024-01-22"), ("1.3.2", "2025-02-17"))
+PHASE_10: dict[str, Line] = {
+    "pkg": static_line(
+        ("a/etree.so", [static_record("zlib", "1.3.1")]),
+        ("a/plain.so", []),
+        ("a/cygrpc.so", [static_record("zlib", "1.3.1.1")]),
+        ("a/node", [static_record("zlib", None, conflict=True)]),
+    ),
+    "gone": {"schema_version": 2, "status": "skipped", "reason": "02-fetch"},
+}
+
+
+def static_text(phase_10: dict[str, Line] | None = PHASE_10) -> str:
+    phase_06 = {**PHASE_06, "zlib": ZLIB_06}
+    return report(PACKAGES, PART_1, phase_06, PHASE_08, phase_10, ROWS, AMBIGUOUS, {})
+
+
+def test_static_rows_follow_the_libs_rows() -> None:
+    out = static_text()
+    last_libs = table_row("libgfortran", "skip", "—", "—", "not tracked",
+                          "skipped", *BLANK)  # fmt: skip
+    etree = (
+        "| a/etree.so | static_lib | zlib | 1.3.1 | library_string |  "
+        "| 1.3.2 (2025-02-17) | 1 | 117 | all | single line | 1.3.2 (2025-02-17) "
+        "| 117 |"
+    )
+    cygrpc = (
+        "| a/cygrpc.so | static_lib | zlib | 1.3.1.1 | library_string |  "
+        "| not compared: no release tag for the version |"
+    )
+    node = (
+        "| a/node | static_lib | zlib | — | — | matches disagree "
+        "| not compared: matches disagree |"
+    )
+    assert f"{last_libs}\n{etree}\n{cygrpc}{' — |' * 6}\n{node}" in out
+    assert "a/plain.so" not in out
+
+
+def test_counts_are_kept_apart_by_linkage() -> None:
+    out = static_text()
+    shared = out.split("### shared_lib\n\n")[1].split("\n\n")[0]
+    static = out.split("### static_lib\n\n")[1].split("\n\n")[0]
+    # The .libs/ counts are what they were before static rows.
+    assert shared in text()
+    assert static == (
+        "- Compared: current 0; behind 1 (library_string 1). By basis.\n"
+        "- On the bundled version's line: current 0; behind 1 "
+        "(library_string 1). By basis.\n"
+        "- Compared, by line status: 1 (single line 1).\n"
+        "- Not compared: 2 (matches disagree 1, no release tag for the "
+        "version 1). By reason.\n"
+        "- Packages not scanned: 1."
+    )
+    assert out.index("### shared_lib") < out.index("### static_lib")
+    assert "Static rows are absent" not in out
+
+
+def test_static_rows_absent_until_phase_10_has_records() -> None:
+    out = static_text(None)
+    assert "- Static rows are absent: phase 10 isn't finished.\n" in out
+    assert "### static_lib" not in out and "static_lib |" not in out
+    old = {
+        "pkg": {**PHASE_10["pkg"], "schema_version": 1},
+        "gone": PHASE_10["gone"],
+    }
+    out = static_text(old)
+    assert (
+        "- Static rows are absent: phase 10's lines predate static_lib records; "
+        "rerun from phase 10.\n"
+    ) in out
+    assert "### static_lib" not in out
+
+
+def test_a_package_with_static_rows_only_or_no_phase_10_line() -> None:
+    part_1 = {
+        "01-resolve": {"bare": PART_1["01-resolve"]["pkg"]},
+        "05-libraries": {"bare": {"status": "ok", "libraries": []}},
+        "10-static": {},
+    }
+    phase_08 = {"bare": {"status": "ok", "wheel": "bare.whl", "records": []}}
+    phase_06 = {"zlib": ZLIB_06}
+    bare = [Package("bare", "1.0")]
+    phase_10 = {"bare": static_line(("b/z.so", [static_record("zlib", "1.3.2")]))}
+    out = report(bare, part_1, phase_06, phase_08, phase_10, ROWS, {}, {})
+    assert "uploaded 2025-06-14\n\nNo .libs/ files.\n\n| file | linkage |" in out
+    assert "| b/z.so | static_lib | zlib | 1.3.2 | library_string |  | 1.3.2" in out
+    error = {"schema_version": 2, "status": "error", "reason": "b/z.so is missing"}
+    out = report(bare, part_1, phase_06, phase_08, {"bare": error}, ROWS, {}, {})
+    assert "No .libs/ files.\n\nNo static rows: error at 10-static: b/z.so is " in out
+
+
+@pytest.mark.parametrize("phase", ["08", "10"])
+def test_an_unknown_linkage_fails(phase: str) -> None:
+    bad = {**static_record("zlib", "1.3.2"), "linkage": "executable"}
+    phase_08, phase_10 = dict(PHASE_08), dict(PHASE_10)
+    if phase == "08":
+        records = cast(list[Line], PHASE_08["pkg"]["records"])
+        phase_08["pkg"] = {**PHASE_08["pkg"], "records": [*records, bad]}
+    else:
+        phase_10["pkg"] = static_line(("a/x.so", [bad]))
+    with pytest.raises(ValueError, match="unknown linkage 'executable'"):
+        report(PACKAGES, PART_1, PHASE_06, phase_08, phase_10, ROWS, {}, {})

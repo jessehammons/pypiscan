@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import cast
 
+from pypiscan.fingerprint import linkage_of
 from pypiscan.library_map import SKIP, Ambiguous, MapRow
 from pypiscan.package_list import Package
 
@@ -105,9 +106,12 @@ def stopped(
 
 
 def libraries_by_prefix(rows: Sequence[MapRow]) -> dict[str, list[str]]:
-    """The libraries the map gives each prefix, in map order."""
+    """The libraries the map gives each prefix, in map order. A detector
+    row's empty prefix names no `.libs/` file, so it isn't one."""
     by_prefix: dict[str, list[str]] = {}
     for each in rows:
+        if not each.prefix:
+            continue
         names = by_prefix.setdefault(each.prefix, [])
         if each.library not in names:
             names.append(each.library)
@@ -135,6 +139,7 @@ def _section(
     records = {
         (str(r["path"]), str(r["library"])): r
         for r in cast(list[Line], fingerprints["records"])
+        if linkage_of(r) == "shared_lib"
     }
     out.append(HEADER)
     for found in files:
