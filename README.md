@@ -981,8 +981,12 @@ two sources:
   noise filter;
 - the hand-written zlib detector (roadmap 2.1), since zlib has no map
   row, run over the binary's bytes, read from the wheel at phase 02's
-  path. Its `contains` results are candidates, with their basis as the
-  kind; its `compiled_against` results are not.
+  path. Each string of a `contains` result's basis is a candidate, with
+  that basis as its kind and its own string's version, so two zlib
+  copies in one binary keep both versions. A string the derivative rule
+  reattributes, such as zlib's banners beside zlib-ng's own string,
+  stays the derivative's with no version. Its `compiled_against`
+  results are not candidates.
 
 Each candidate records the library, the version, the kind, the matched
 string, its file offset and ELF section, and the map row's pattern, or
@@ -1008,7 +1012,8 @@ string risk; and distinct templates.
 **Candidates.** For each package, each candidate with its member,
 library, version, kind and matched string, labeled "unconfirmed static
 candidate", with an ambiguous version marked as the fingerprint report
-marks it.
+marks it, and "conflict" when a binary's candidates for one library
+give different versions.
 
 - A candidate whose map row's **identity_file** is a header (`.h` or
   `.h.in`), such as OpenSSL's `include/openssl/opensslv.h.in` and
@@ -1677,6 +1682,13 @@ again only rows.
   Some CVEs affect one half: CVE-2022-37434 is in inflate,
   CVE-2018-25032 in deflate. zlib stays one library, and matching could
   record which halves are present.
+- **Rust source paths in the static templates.** In the top-100 run,
+  about 90 of the static discovery report's top 100 templates are Rust
+  crate source paths (`/rust/deps/…` and `.cargo/registry/…`), one per
+  `.rs` file, so they crowd out the C libraries' strings. The paths
+  carry crate versions, such as `aws-lc-sys`'s, that T.2 reads, so a
+  noise rule would hide them; collapsing each path to its crate
+  directory would keep one template per crate.
 - **Phase files from an older numbering.** A lone `10-cves.jsonl` from
   before T.1 passes pre-flight as phase 10. Checking each file's name
   against its number's phase would catch it.

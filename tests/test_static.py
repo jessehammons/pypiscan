@@ -104,6 +104,52 @@ def test_zlib_banners_give_two_candidates(tmp_path: Path) -> None:
     assert cast(int, deflate["offset"]) < cast(int, inflate["offset"])
 
 
+def test_disagreeing_zlib_copies_keep_their_own_versions(tmp_path: Path) -> None:
+    # Two zlib copies in one binary, as in playwright's node: each banner
+    # gives its own version, and the report notes the conflict.
+    old = (
+        b" deflate 1.3.0.1 Copyright 1995-2023 Jean-loup Gailly and Mark Adler \0"
+        b" inflate 1.3.0.1 Copyright 1995-2023 Mark Adler \0"
+    )
+    ext = build_elf(None, rodata=b"\0" + DEFLATE + INFLATE + old)
+    lines = earlier(wheel(tmp_path, {"pkg/_ext.so": ext}))
+    result = run(lines)
+    found = candidates(result)["pkg/_ext.so"]
+    assert [(c["library"], c["version"]) for c in found] == [
+        ("zlib", "1.3.2"),
+        ("zlib", "1.3.2"),
+        ("zlib", "1.3.0.1"),
+        ("zlib", "1.3.0.1"),
+    ]
+    static = {"pkg": {"status": "ok", "reason": None, **result.data}}
+    phases = {"04-strings": {"pkg": lines["04-strings"]}}
+    text = report([Package("pkg", "1")], phases, static, ROWS, AMBIGUOUS)
+    assert text.count("| unconfirmed static candidate; conflict |") == 2
+    assert (
+        text.count(
+            "| unconfirmed static candidate; conflict; ambiguous: may also be 1.3.2.1 |"
+        )
+        == 2
+    )
+
+
+def test_banners_in_zlib_ng_stay_zlib_ng_with_no_version(tmp_path: Path) -> None:
+    ext = build_elf(None, rodata=b"\0" + DEFLATE + INFLATE + b" zlib-ng 2.3.3\0")
+    lines = earlier(wheel(tmp_path, {"pkg/_ext.so": ext}))
+    result = run(lines)
+    found = candidates(result)["pkg/_ext.so"]
+    assert [(c["library"], c["version"]) for c in found] == [
+        ("zlib-ng", None),
+        ("zlib-ng", None),
+        ("zlib-ng", "2.3.3"),
+    ]
+    static = {"pkg": {"status": "ok", "reason": None, **result.data}}
+    phases = {"04-strings": {"pkg": lines["04-strings"]}}
+    text = report([Package("pkg", "1")], phases, static, ROWS, {})
+    assert "| pkg/_ext.so | zlib-ng | — | library_string |" in text
+    assert "conflict" not in text
+
+
 def test_compiled_against_gives_no_candidate(tmp_path: Path) -> None:
     ext = build_elf(None, rodata=b"\x002.3.3.zlib-ng\0")
     found = candidates(run(earlier(wheel(tmp_path, {"pkg/_ext.so": ext}))))

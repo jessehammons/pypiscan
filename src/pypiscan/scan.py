@@ -474,9 +474,10 @@ def static_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
     Candidates come from the ``library_string`` and ``build_path``
     recognizers in phase 07's lines, under any prefix and each run once,
     over the binary's strings that pass the noise filter; and from the zlib
-    detector's ``contains`` records, one per piece of evidence of the
-    record's basis, over the binary's bytes read from the wheel at phase
-    02's path. Binaries follow phase 04's order, candidates their offset.
+    detector's ``contains`` results, one per matched string of the result's
+    basis with that string's own version, over the binary's bytes read from
+    the wheel at phase 02's path. Binaries follow phase 04's order,
+    candidates their offset.
     """
     unique: dict[tuple[str, str, str], tuple[Recognizer, re.Pattern[str]]] = {}
     for found in compile_recognizers(recognizer_lines).values():
@@ -484,7 +485,7 @@ def static_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
             if r.kind in STATIC_KINDS and isinstance(r.compiled, re.Pattern):
                 unique.setdefault((r.library, r.kind, r.pattern), (r, r.compiled))
 
-    def candidates(wheel: str, binary: BinaryStrings, data: bytes) -> list[Line]:
+    def candidates(path: str, binary: BinaryStrings, data: bytes) -> list[Line]:
         found = [
             _candidate(
                 r.library, m[1], r.kind, s["text"], s["offset"], s["section"], r.pattern
@@ -493,14 +494,19 @@ def static_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
             for s in binary["strings"]
             if usable(s) and (m := compiled.fullmatch(s["text"]))
         ]
-        for record in fingerprint.fingerprint_binary(
-            DETECTORS, wheel, binary["path"], data
-        ):
-            if record["relation"] == "contains":
+        # Each string of a contains result's basis, with its own version;
+        # a string the derivative rule reattributes has none.
+        for by_library in fingerprint.binary_matches(DETECTORS, path, data):
+            for matches in by_library.values():
+                result = fingerprint.resolve(matches)
+                if result is None or result[0] != "contains":
+                    continue
                 found += [
-                    _candidate(record["library"], record["version"], **evidence)
-                    for evidence in record["evidence"]
-                    if evidence["kind"] == record["basis"]
+                    _candidate(
+                        m.library, m.version, m.kind, m.text, m.offset, m.section
+                    )
+                    for m in matches
+                    if m.kind == result[1]
                 ]
         found.sort(key=lambda c: (cast(int, c["offset"]), str(c["library"])))
         return found
@@ -524,7 +530,7 @@ def static_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
                     {
                         "path": path,
                         "sha256": sha256,
-                        "candidates": candidates(wheel, binary, data),
+                        "candidates": candidates(path, binary, data),
                     }
                 )
         except MemberError as exc:

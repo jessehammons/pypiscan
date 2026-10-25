@@ -49,16 +49,30 @@ def _header_rows(rows: Sequence[MapRow]) -> set[tuple[str, str, str]]:
     }
 
 
+def _conflicts(candidates: Sequence[Line]) -> set[str]:
+    """The libraries whose candidates in one binary give different versions."""
+    versions: dict[str, set[str]] = {}
+    for c in candidates:
+        if c["version"] is not None:
+            versions.setdefault(str(c["library"]), set()).add(str(c["version"]))
+    return {library for library, found in versions.items() if len(found) > 1}
+
+
 def _note(
-    candidate: Line, headers: set[tuple[str, str, str]], ambiguous: Ambiguous
+    candidate: Line,
+    headers: set[tuple[str, str, str]],
+    ambiguous: Ambiguous,
+    conflicts: set[str],
 ) -> str:
     library, version = str(candidate["library"]), candidate["version"]
     notes = [LABEL]
     if (library, candidate["kind"], candidate["pattern"]) in headers:
         notes.append(HEADER_RISK)
-    if version is None:
-        notes.append("matches disagree")
-    elif note := ambiguous_note(library, str(version), ambiguous):
+    if library in conflicts:
+        notes.append("conflict")
+    if version is not None and (
+        note := ambiguous_note(library, str(version), ambiguous)
+    ):
         notes.append(note)
     return "; ".join(notes)
 
@@ -141,8 +155,10 @@ def report(
         binaries += len(found)
         table: list[str] = []
         for binary in found:
-            for candidate in cast(list[Line], binary["candidates"]):
-                note = _note(candidate, headers, ambiguous)
+            listed = cast(list[Line], binary["candidates"])
+            conflicts = _conflicts(listed)
+            for candidate in listed:
+                note = _note(candidate, headers, ambiguous, conflicts)
                 by_library[str(candidate["library"])] += 1
                 by_kind[str(candidate["kind"])] += 1
                 risky += HEADER_RISK in note
