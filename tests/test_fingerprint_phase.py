@@ -131,12 +131,13 @@ def test_library_string_and_bare_version_agree() -> None:
     bare = string("1.6.58", 40)
     [record] = records(file("libpng16", lib, bare))
     assert record == {
-        "schema_version": 3,
+        "schema_version": 4,
         "wheel": "pkg.whl",
         "path": "pkg.libs/libpng16-1a2b3c4d.so.1",
         "sha256": "sha-libpng16",
         "library": "libpng",
         "relation": "contains",
+        "linkage": "shared_lib",
         "basis": "library_string",
         "version": "1.6.58",
         "conflict": False,
@@ -360,7 +361,8 @@ def test_version_function_joins_string_matches(tmp_path: Path) -> None:
             "section": ".text",
         },
     ]
-    assert record["schema_version"] == 3
+    assert record["schema_version"] == 4
+    assert record["linkage"] == "shared_lib"
 
 
 def test_version_function_ranks_below_build_path(tmp_path: Path) -> None:

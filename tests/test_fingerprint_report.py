@@ -1,5 +1,7 @@
 """The fingerprint report on hand-built phase 01 to 08 lines and map rows."""
 
+import pytest
+
 from pypiscan.fingerprint_report import INTRO, report
 from pypiscan.library_map import MapRow
 from pypiscan.package_list import Package
@@ -85,8 +87,10 @@ def record(
     conflict: bool = False,
 ) -> Line:
     return {
+        "schema_version": 4,
         "path": path(prefix),
         "library": library,
+        "linkage": "shared_lib",
         "version": version,
         "basis": basis,
         "conflict": conflict,
@@ -287,3 +291,12 @@ def test_ambiguous_versions_are_noted() -> None:
         "| libnull-1a2b3c4d.so.1 | lcms | — | — | matches disagree |",
         f"| libother-1a2b3c4d.so.1 | other | 2.19.0 | {VF} |  |",
     ]
+
+
+def test_an_unknown_linkage_fails() -> None:
+    a = PHASE_08["a"]
+    bad = {**record("libwebp", "libwebp", "1.6.0", "library_string")}
+    bad["linkage"] = "executable"
+    phase_08 = {**PHASE_08, "a": {**a, "records": [bad]}}
+    with pytest.raises(ValueError, match="unknown linkage 'executable'"):
+        report(PACKAGES, PHASES_01_TO_05, PHASE_07, phase_08, ROWS, {})

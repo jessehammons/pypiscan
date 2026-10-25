@@ -4,6 +4,7 @@ rows."""
 import hashlib
 import re
 from collections import Counter
+from typing import cast
 
 import pytest
 
@@ -274,6 +275,8 @@ def contains(
         "path": f"{package}.libs/{name}",
         "library": library,
         "relation": "contains",
+        "schema_version": 4,
+        "linkage": "shared_lib",
         "version": version,
         "basis": basis,
         "conflict": False,
@@ -607,3 +610,12 @@ def test_phase_09s_own_error_names_phase_09() -> None:
     )
     assert text.endswith("\n## c 1.0\n\nerror at 09-sboms: wheel x is missing\n")
     assert "Packages scanned in phase 09: 0; with any SBOM: 0;" in text
+
+
+def test_an_unknown_linkage_fails() -> None:
+    a = PHASE_08["a"]
+    records = cast(list[Line], a["records"])
+    bad = {**records[0], "linkage": "executable"}
+    phase_08 = {**PHASE_08, "a": {**a, "records": [bad]}}
+    with pytest.raises(ValueError, match="unknown linkage 'executable'"):
+        report(PACKAGES, by_phase(BY_PACKAGE), phase_08, PHASE_09, ROWS, {})

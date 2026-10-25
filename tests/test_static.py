@@ -1,4 +1,5 @@
-"""Phase 10 and the static discovery report (roadmap T.1).
+"""Phase 10 and the static discovery report (roadmap T.1), and phase 10's
+static_lib records (roadmap T.3).
 
 Wheels are built in ``tmp_path`` from ``elf_builder.build_elf`` images, and
 phase 04's lines come from ``strings_wheel`` over them, as phase 04 writes
@@ -6,12 +7,14 @@ them. The recognizers come from phase 07 lines built from the committed
 library map.
 """
 
+import hashlib
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
 from elf_builder import build_elf
-from pypiscan.library_map import load_library_map
+from pypiscan.library_map import MapRow, load_library_map
 from pypiscan.library_report import prefix
 from pypiscan.package_list import Package
 from pypiscan.scan import (
@@ -33,6 +36,7 @@ DEFLATE = b" deflate 1.3.2 Copyright 1995-2026 Jean-loup Gailly and Mark Adler \
 INFLATE = b" inflate 1.3.2 Copyright 1995-2026 Mark Adler \0"
 OPENSSL = b"\0OpenSSL 3.5.8 25 Aug 2026\0"
 OPENBLAS = b"\0OpenBLAS 0.3.31.dev DYNAMIC_ARCH NO_AFFINITY \0"
+BZIP2 = b"\x001.0.8, 13-Jul-2019\0"
 
 
 def phase_07_lines() -> list[Line]:
@@ -73,10 +77,10 @@ def earlier(path: Path) -> dict[str, Line]:
     }
 
 
-def run(lines: dict[str, Line]) -> Result:
-    phase = static_phase(MAP_LINES)
+def run(lines: dict[str, Line], rows: list[MapRow] = ROWS) -> Result:
+    phase = static_phase(MAP_LINES, rows)
     assert phase.name == "10-static" and phase.skip_not_ok
-    assert phase.schema_version == STATIC_SCHEMA_VERSION == 1
+    assert phase.schema_version == STATIC_SCHEMA_VERSION == 2
     return phase.run(Package("pkg", "1"), lines)
 
 
@@ -263,3 +267,119 @@ def test_report_counts_a_phase_10_error_and_no_candidates(tmp_path: Path) -> Non
     assert "- 0 candidates: by library, none; by kind, none\n" in text
     assert "No candidates." in text
     assert "error at 10-static: pkg/x.so is missing from b.whl" in text
+
+
+# static_lib records (roadmap T.3).
+
+
+def fingerprints(result: Result) -> dict[str, list[Line]]:
+    assert result.status == "ok", result.reason
+    binaries = cast(list[Line], result.data["binaries"])
+    return {str(b["path"]): cast(list[Line], b["fingerprints"]) for b in binaries}
+
+
+def summary(record: Line) -> tuple[object, ...]:
+    return (
+        record["library"],
+        record["linkage"],
+        record["relation"],
+        record["basis"],
+        record["version"],
+        record["conflict"],
+        len(cast(list[Line], record["evidence"])),
+    )
+
+
+def test_pattern_row_gives_a_static_lib_record(tmp_path: Path) -> None:
+    # bzip2's row is pattern; OpenSSL's isn't, so it stays a candidate.
+    ext = build_elf(None, rodata=BZIP2 + OPENSSL)
+    result = run(earlier(wheel(tmp_path, {"pkg/libarrow.so.2600": ext})))
+    assert len(candidates(result)["pkg/libarrow.so.2600"]) == 2
+    [record] = fingerprints(result)["pkg/libarrow.so.2600"]
+    [evidence] = cast(list[Line], record["evidence"])
+    assert {k: v for k, v in record.items() if k != "evidence"} == {
+        "schema_version": 4,
+        "wheel": "pkg.whl",
+        "path": "pkg/libarrow.so.2600",
+        "sha256": hashlib.sha256(ext).hexdigest(),
+        "library": "bzip2",
+        "relation": "contains",
+        "linkage": "static_lib",
+        "basis": "library_string",
+        "version": "1.0.8",
+        "conflict": False,
+    }
+    assert evidence == {
+        "kind": "library_string",
+        "text": "1.0.8, 13-Jul-2019",
+        "offset": ext.index(BZIP2) + 1,
+        "section": ".rodata",
+    }
+
+
+def test_zlib_detector_gives_one_record_per_binary(tmp_path: Path) -> None:
+    ext = build_elf(None, rodata=b"\0" + DEFLATE + INFLATE)
+    result = run(earlier(wheel(tmp_path, {"pkg/_ext.so": ext})))
+    assert [summary(r) for r in fingerprints(result)["pkg/_ext.so"]] == [
+        ("zlib", "static_lib", "contains", "library_string", "1.3.2", False, 2)
+    ]
+
+
+def test_two_zlib_copies_give_one_conflicting_record(tmp_path: Path) -> None:
+    # playwright's node: the record has no version, and the candidates keep
+    # both.
+    old = (
+        b" deflate 1.3.0.1 Copyright 1995-2023 Jean-loup Gailly and Mark Adler \0"
+        b" inflate 1.3.0.1 Copyright 1995-2023 Mark Adler \0"
+    )
+    ext = build_elf(None, rodata=b"\0" + DEFLATE + INFLATE + old)
+    result = run(earlier(wheel(tmp_path, {"pkg/_ext.so": ext})))
+    assert [summary(r) for r in fingerprints(result)["pkg/_ext.so"]] == [
+        ("zlib", "static_lib", "contains", "library_string", None, True, 4)
+    ]
+    assert len(candidates(result)["pkg/_ext.so"]) == 4
+
+
+def test_derivative_rule_applies_to_static_records(tmp_path: Path) -> None:
+    ext = build_elf(None, rodata=b"\0" + DEFLATE + INFLATE + b" zlib-ng 2.3.3\0")
+    result = run(earlier(wheel(tmp_path, {"pkg/_ext.so": ext})))
+    assert [summary(r) for r in fingerprints(result)["pkg/_ext.so"]] == [
+        ("zlib-ng", "static_lib", "contains", "library_string", "2.3.3", False, 3)
+    ]
+
+
+def test_compiled_against_gives_no_record(tmp_path: Path) -> None:
+    ext = build_elf(None, rodata=b"\x002.3.3.zlib-ng\0")
+    result = run(earlier(wheel(tmp_path, {"pkg/_ext.so": ext})))
+    assert fingerprints(result) == {"pkg/_ext.so": []}
+
+
+def test_no_records_without_static_lib_detection(tmp_path: Path) -> None:
+    # With no detector row for zlib and no pattern row, only candidates.
+    rows = [replace(r, static_lib_detection="") for r in ROWS if r.prefix]
+    ext = build_elf(None, rodata=b"\0" + DEFLATE + INFLATE + BZIP2)
+    result = run(earlier(wheel(tmp_path, {"pkg/_ext.so": ext})), rows)
+    assert len(candidates(result)["pkg/_ext.so"]) == 3
+    assert fingerprints(result) == {"pkg/_ext.so": []}
+
+
+def test_libs_files_get_no_static_records(tmp_path: Path) -> None:
+    members = {
+        "pkg.libs/libz-1a2b3c4d.so.1": build_elf(None, rodata=b"\0" + DEFLATE),
+        "pkg/_ext.so": build_elf(None, rodata=b"\0" + DEFLATE),
+    }
+    assert list(fingerprints(run(earlier(wheel(tmp_path, members))))) == ["pkg/_ext.so"]
+
+
+def test_report_counts_candidates_that_became_records(tmp_path: Path) -> None:
+    ext = build_elf(None, rodata=b"\0" + DEFLATE + INFLATE + OPENSSL + BZIP2)
+    lines = earlier(wheel(tmp_path, {"pkg/_ext.so": ext}))
+    static = {"pkg": {"status": "ok", "reason": None, **run(lines).data}}
+    phases = {"04-strings": {"pkg": lines["04-strings"]}}
+    text = report([Package("pkg", "1")], phases, static, ROWS, {})
+    assert "- 4 candidates: by library, bzip2 1, openssl 1, zlib 2;" in text
+    assert "- 3 candidates that became static_lib records\n" in text
+    # A line from before T.3 has no records.
+    del cast(list[Line], static["pkg"]["binaries"])[0]["fingerprints"]
+    text = report([Package("pkg", "1")], phases, static, ROWS, {})
+    assert "- 0 candidates that became static_lib records\n" in text

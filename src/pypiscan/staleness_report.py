@@ -2,9 +2,10 @@
 upstream's releases on the day the wheel was uploaded.
 
 See README "The staleness report" (roadmap S.1). ``report`` is a pure function
-of phases 01 to 05, 06 and 08's lines, the library map's rows, the list of
-ambiguous versions and the lines' ends of life (roadmap S.4); ``scan``
-writes the result as ``staleness-report.md``. It names no CVE: it is a
+of phases 01 to 05, 06, 08 and, once it is finished, 10's lines, the library
+map's rows, the list of ambiguous versions and the lines' ends of life
+(roadmap S.4); ``scan`` writes the result as ``staleness-report.md``. Rows
+and counts are kept apart by linkage (roadmap T.3). It names no CVE: it is a
 measurement, not a finding.
 """
 
@@ -15,6 +16,7 @@ from datetime import UTC, date, datetime
 from pathlib import PurePosixPath
 from typing import cast
 
+from pypiscan.fingerprint import LINKAGES, Linkage, linkage_of
 from pypiscan.fingerprint_report import (
     FINGERPRINT,
     NONE,
@@ -40,6 +42,9 @@ from pypiscan.package_list import Package
 # whether it is a release.
 FLAGGED = 3
 RERUN = "rerun from phase 06"
+# Phase 10's lines from this schema_version on hold static_lib records.
+STATIC_RECORDS = 2
+STATIC = "10-static"
 NO_TAG = "no release tag for the version"
 # A version that can be ordered as a tuple of integers.
 DOTTED = re.compile(r"\d+(\.\d+)*")
@@ -52,9 +57,9 @@ is a measurement, not a finding, and every version is shown with the basis
 it rests on; see "The staleness report" in the README.
 """
 HEADER = (
-    "| file | library | version | basis | note | newest at upload "
+    "| file | linkage | library | version | basis | note | newest at upload "
     "| newer | days behind | line | line status | newest on line at upload "
-    "| days behind on line |\n|---|---|---|---|---|---|---|---|---|---|---|---|"
+    "| days behind on line |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|"
 )
 # The line cell of a library that maintains one line.
 ALL = "all"
@@ -156,6 +161,7 @@ def staleness(
 
 def _row(
     name: str,
+    linkage: Linkage,
     library: str,
     record: Line | None,
     recognized: bool,
@@ -169,7 +175,7 @@ def _row(
     blank = [NONE] * 6
     if library == SKIP:
         counts["skipped"] += 1
-        return row(name, library, version, basis, note, "skipped", *blank)
+        return row(name, linkage, library, version, basis, note, "skipped", *blank)
     notes = [note] if note else []
     if basis == "bare_version":
         notes.insert(0, "hint")
@@ -187,7 +193,8 @@ def _row(
     if isinstance(result, str):
         counts[f"not compared: {result}"] += 1
         shown = f"not compared: {result}"
-        return row(name, library, version, basis, "; ".join(notes), shown, *blank)
+        joined = "; ".join(notes)
+        return row(name, linkage, library, version, basis, joined, shown, *blank)
     extra, newest, newer, behind, *on_line = result
     notes += [extra] if extra else []
     counts[f"{'current' if newer == '0' else 'behind'}: {basis}"] += 1
@@ -195,49 +202,55 @@ def _row(
     counts[f"line status: {'EOL' if status.startswith('EOL') else status}"] += 1
     counts[f"{'current' if line_behind == '0' else 'behind'} on line: {basis}"] += 1
     return row(
-        name, library, version, basis, "; ".join(notes), newest, newer, behind, *on_line
+        name,
+        linkage,
+        library,
+        version,
+        basis,
+        "; ".join(notes),
+        newest,
+        newer,
+        behind,
+        *on_line,
     )
 
 
-def _section(
+type Context = tuple[
+    Mapping[str, Line],
+    Mapping[str, list[str]],
+    set[tuple[str, str]],
+    Ambiguous,
+    tuple[Mapping[str, str], LineEol],
+]
+
+
+def _static_rows(
     package: Package,
+    static: Line,
     part_1: Mapping[str, Mapping[str, Line]],
-    fingerprints: Line,
-    upstream: Mapping[str, Line],
-    by_prefix: Mapping[str, list[str]],
-    recognized: set[tuple[str, str]],
-    ambiguous: Ambiguous,
-    lines: tuple[Mapping[str, str], LineEol],
+    uploaded: date,
+    context: Context,
     counts: Counter[str],
-) -> list[str]:
-    out = [f"## {package.name} {package.version}", ""]
-    if fingerprints["status"] != "ok":
-        counts["packages not scanned"] += 1
-        out.append(stopped(package.name, fingerprints, part_1, FINGERPRINT))
-        return out
-    uploaded = upload_day(part_1["01-resolve"][package.name])
-    out += [f"`{fingerprints['wheel']}`, uploaded {uploaded}", ""]
-    libraries = part_1["05-libraries"][package.name]
-    files = cast(list[Mapping[str, str]], libraries.get("libraries") or [])
-    if not files:
-        out.append("No .libs/ files.")
-        return out
-    contains = {
-        (str(r["path"]), str(r["library"])): r
-        for r in cast(list[Line], fingerprints["records"])
-        if r["relation"] == "contains"
-    }
-    out.append(HEADER)
-    for found in files:
-        name = PurePosixPath(found["path"]).name
-        prefix = found["prefix"]
-        for library in by_prefix.get(prefix, []):
-            out.append(
+) -> tuple[list[str], str | None]:
+    """A package's static_lib rows from its phase 10 line, each named by its
+    member, or why there are none."""
+    if static["status"] != "ok":
+        counts["phase 10 not ok"] += 1
+        return [], stopped(package.name, static, part_1, STATIC)
+    upstream, _, _, ambiguous, lines = context
+    found: list[str] = []
+    for binary in cast(list[Line], static["binaries"]):
+        for record in cast(list[Line], binary["fingerprints"]):
+            if linkage_of(record) != "static_lib":
+                continue
+            library = str(record["library"])
+            found.append(
                 _row(
-                    name,
+                    str(binary["path"]),
+                    "static_lib",
                     library,
-                    contains.get((found["path"], library)),
-                    (prefix, library) in recognized,
+                    record,
+                    True,
                     upstream.get(library),
                     uploaded,
                     ambiguous,
@@ -245,6 +258,64 @@ def _section(
                     counts,
                 )
             )
+    return found, None
+
+
+def _section(
+    package: Package,
+    part_1: Mapping[str, Mapping[str, Line]],
+    fingerprints: Line,
+    static: Line | None,
+    context: Context,
+    counts: Mapping[Linkage, Counter[str]],
+) -> list[str]:
+    upstream, by_prefix, recognized, ambiguous, lines = context
+    out = [f"## {package.name} {package.version}", ""]
+    if fingerprints["status"] != "ok":
+        out.append(stopped(package.name, fingerprints, part_1, FINGERPRINT))
+        return out
+    uploaded = upload_day(part_1["01-resolve"][package.name])
+    out += [f"`{fingerprints['wheel']}`, uploaded {uploaded}", ""]
+    libraries = part_1["05-libraries"][package.name]
+    files = cast(list[Mapping[str, str]], libraries.get("libraries") or [])
+    contains = {
+        (str(r["path"]), str(r["library"])): r
+        for r in cast(list[Line], fingerprints["records"])
+        if r["relation"] == "contains" and linkage_of(r) == "shared_lib"
+    }
+    shared: list[str] = []
+    for found in files:
+        name = PurePosixPath(found["path"]).name
+        prefix = found["prefix"]
+        for library in by_prefix.get(prefix, []):
+            shared.append(
+                _row(
+                    name,
+                    "shared_lib",
+                    library,
+                    contains.get((found["path"], library)),
+                    (prefix, library) in recognized,
+                    upstream.get(library),
+                    uploaded,
+                    ambiguous,
+                    lines,
+                    counts["shared_lib"],
+                )
+            )
+    static_rows, why = (
+        ([], None)
+        if static is None
+        else _static_rows(
+            package, static, part_1, uploaded, context, counts["static_lib"]
+        )
+    )
+    if not files:
+        out.append("No .libs/ files.")
+    if shared or static_rows:
+        out += [""] if not files else []
+        out += [HEADER, *shared, *static_rows]
+    if why is not None:
+        out += ["", f"No static rows: {why}"]
     return out
 
 
@@ -259,52 +330,88 @@ def _split(counts: Counter[str], outcome: str) -> str:
     return f"{total} ({', '.join(f'{k} {n}' for k, n in parts)})" if parts else "0"
 
 
-def report(
-    packages: Sequence[Package],
-    part_1: Mapping[str, Mapping[str, Line]],
-    upstream: Mapping[str, Line],
-    fingerprints: Mapping[str, Line],
-    rows: Sequence[MapRow],
-    ambiguous: Ambiguous,
-    line_eol: LineEol,
-) -> str:
-    """The report's text, from phases 01 to 05's lines keyed by phase and
-    package name, phase 06's keyed by library, phase 08's keyed by package
-    name, the map's rows, the list of ambiguous versions and the lines'
-    ends of life."""
-    by_prefix = libraries_by_prefix(rows)
-    lines = ({r.library: r.line for r in rows}, line_eol)
-    recognized = {(r.prefix, r.library) for r in rows if r.kind}
-    counts: Counter[str] = Counter()
-    sections: list[str] = []
-    for package in packages:
-        sections += _section(
-            package,
-            part_1,
-            fingerprints[package.name],
-            upstream,
-            by_prefix,
-            recognized,
-            ambiguous,
-            lines,
-            counts,
-        )
-        sections.append("")
-    c = counts
+def _summary(c: Counter[str], linkage: Linkage) -> list[str]:
     summary = [
+        f"### {linkage}",
+        "",
         f"- Compared: current {_split(c, 'current')}; "
         f"behind {_split(c, 'behind')}. By basis.",
         f"- On the bundled version's line: current {_split(c, 'current on line')}; "
         f"behind {_split(c, 'behind on line')}. By basis.",
         f"- Compared, by line status: {_split(c, 'line status')}.",
         f"- Not compared: {_split(c, 'not compared')}. By reason.",
-        f"- Files whose prefix is marked skip: {c['skipped']}.",
-        f"- Packages not scanned: {c['packages not scanned']}.",
     ]
-    if any(_not_compared(line) == RERUN for line in upstream.values()):
-        summary.insert(
-            0,
-            "- Phase 06's lines predate tag dates or release flags, so their "
-            f"libraries aren't compared: {RERUN}.",
+    if linkage == "shared_lib":
+        summary.append(f"- Files whose prefix is marked skip: {c['skipped']}.")
+    else:
+        summary.append(
+            f"- Packages whose phase 10 line isn't ok: {c['phase 10 not ok']}."
         )
-    return "\n".join([INTRO, "## Counts", "", *summary, "", *sections])
+    return [*summary, ""]
+
+
+def _static_problem(static: Mapping[str, Line] | None) -> str | None:
+    """Why static rows are absent, or None."""
+    if static is None:
+        return "Static rows are absent: phase 10 isn't finished."
+    if any(
+        cast(int, line["schema_version"]) < STATIC_RECORDS for line in static.values()
+    ):
+        return (
+            "Static rows are absent: phase 10's lines predate static_lib "
+            "records; rerun from phase 10."
+        )
+    return None
+
+
+def report(
+    packages: Sequence[Package],
+    part_1: Mapping[str, Mapping[str, Line]],
+    upstream: Mapping[str, Line],
+    fingerprints: Mapping[str, Line],
+    static: Mapping[str, Line] | None,
+    rows: Sequence[MapRow],
+    ambiguous: Ambiguous,
+    line_eol: LineEol,
+) -> str:
+    """The report's text, from phases 01 to 05's lines keyed by phase and
+    package name, phase 06's keyed by library, phases 08 and 10's keyed by
+    package name (10's ``None`` when it isn't finished), the map's rows, the
+    list of ambiguous versions and the lines' ends of life."""
+    context: Context = (
+        upstream,
+        libraries_by_prefix(rows),
+        {(r.prefix, r.library) for r in rows if r.kind},
+        ambiguous,
+        ({r.library: r.line for r in rows}, line_eol),
+    )
+    absent = _static_problem(static)
+    counts: dict[Linkage, Counter[str]] = {k: Counter() for k in LINKAGES}
+    sections: list[str] = []
+    for package in packages:
+        sections += _section(
+            package,
+            part_1,
+            fingerprints[package.name],
+            None if absent or static is None else static[package.name],
+            context,
+            counts,
+        )
+        sections.append("")
+    summary: list[str] = []
+    if any(_not_compared(line) == RERUN for line in upstream.values()):
+        summary.append(
+            "- Phase 06's lines predate tag dates or release flags, so their "
+            f"libraries aren't compared: {RERUN}."
+        )
+    if absent:
+        summary.append(f"- {absent}")
+    # Per package, so once above the per-linkage blocks.
+    not_scanned = sum(fingerprints[p.name]["status"] != "ok" for p in packages)
+    summary += [f"- Packages not scanned: {not_scanned}.", ""]
+    # One block per linkage present, so the .libs/ counts stay comparable
+    # with reports from before static rows.
+    present: list[Linkage] = ["shared_lib"] if absent else ["shared_lib", "static_lib"]
+    for linkage in present:
+        summary += _summary(counts[linkage], linkage)
+    return "\n".join([INTRO, "## Counts", "", *summary, *sections])

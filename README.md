@@ -258,6 +258,17 @@ per binary, library and relation:
 - `relation`: `contains` when a library string, build path, version
   function machine code or bare version matched; `compiled_against` when
   only header strings did.
+- `linkage`: where the library was found, by the binary's location:
+  `shared_lib` when it was found in a `.libs/` file through that file's
+  prefix (phase 08), and `static_lib` when it was found in a binary
+  outside `.libs/` (phase 10), such as pyarrow's bzip2 in
+  `pyarrow/libarrow.so.2600`, though that file is itself a shared
+  library. The `fingerprint` command sets it the same way, by whether the
+  binary is in a `.libs/` directory. It is a closed set, and other values
+  may come later, such as a library shipped as an executable (ffmpeg);
+  every reader fails on a value it doesn't know. A record from before
+  `schema_version` 4 has none, and is read as `shared_lib`, since phase 08
+  wrote all of them.
 - `basis`: for `contains`, the strongest kind present (`library_string`,
   `build_path`, `version_function_machine_code` or `bare_version`): the
   kind that sets the version, or would if its matches agreed. For
@@ -657,7 +668,8 @@ Part 2:
    06, because recognizers come from the map, so a library whose clone was
    skipped or failed still gets them.
 8. `08-fingerprint` (per package): run the recognizers on each shared
-   library whose prefix maps to them, giving `fingerprint` records. It
+   library whose prefix maps to them, giving `fingerprint` records with
+   linkage `shared_lib`. It
    compiles the recognizers from phase 07's lines, so phase 07's file is the
    record of what ran, and matches them against the library's strings in
    phase 04's records that pass the noise filter, without reading the wheel
@@ -687,7 +699,9 @@ Part 2:
    episode (see
    [Comparing SBOMs with fingerprints](#comparing-sboms-with-fingerprints)).
 10. `10-static` (per package): unconfirmed candidates for statically
-    linked libraries in the wheel's binaries outside `.libs/` (see
+    linked libraries in the wheel's binaries outside `.libs/`, and
+    `fingerprint` records with linkage `static_lib` from those whose map
+    row's **static_lib_detection** qualifies them (see
     [The static discovery report](#the-static-discovery-report)). Once
     phase 10 is finished, every run rewrites `static-report.md` in the
     episode.
@@ -698,27 +712,30 @@ Part 2:
     verifier (6.3) checks the table's fixes in the clone.
 12. `12-match` (per package): each library version that falls inside a
     CVE's affected range, with its evidence level. A match is a candidate
-    for investigation, not a finding.
+    for investigation, not a finding. It reads phase 10's `static_lib`
+    records as well as phase 08's.
 
 ### The library map
 
 `data/libraries.csv` is curated input, edited by hand and committed like
 the package list. One row per prefix, library and way of identifying it:
 
-| prefix | library | repo | tags | not_release | line | kind | pattern | identity_file | identity | cpe | osv |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| `libtiff` | `libtiff` | `https://gitlab.com/libtiff/libtiff` | `v{version}` | | `single_line` | `library_string` | `LIBTIFF, Version {version}` | `libtiff/tiffvers.h.in` | | `libtiff:libtiff` | … |
-| `libfreetype` | `bzip2` | `https://sourceware.org/git/bzip2.git` | `bzip2-{version}` | | `single_line` | `library_string` | `{version}, {any}-{any}-20{any}` | `bzlib_private.h` | | `bzip:bzip2` | … |
-| `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | | `single_line` | `build_path` | `{any}/openjpeg-{version}/{any}` | | | `uclouvain:openjpeg` | … |
-| `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | | `single_line` | `bare_version` | `{version}` | `src/lib/openjp2/opj_config_private.h.cmake.in` | | `uclouvain:openjpeg` | … |
-| `libwebp` | `libwebp` | `https://chromium.googlesource.com/webm/libwebp` | `v{version}` | | `single_line` | `version_function_machine_code` | `WebPGetDecoderVersion -> bits *.8.8` | `src/dec/vp8_dec.c` | | `webmproject:libwebp` | … |
-| `libfreetype` | `freetype` | `https://gitlab.freedesktop.org/freetype/freetype` | `VER-{version}` | | `single_line` | | | | | `freetype:freetype` | |
-| `libgfortran` | `skip` | | | | | | | | | | |
+| prefix | library | repo | tags | not_release | line | kind | pattern | identity_file | identity | static_lib_detection | cpe | osv |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `libtiff` | `libtiff` | `https://gitlab.com/libtiff/libtiff` | `v{version}` | | `single_line` | `library_string` | `LIBTIFF, Version {version}` | `libtiff/tiffvers.h.in` | | | `libtiff:libtiff` | … |
+| `libfreetype` | `bzip2` | `https://sourceware.org/git/bzip2.git` | `bzip2-{version}` | | `single_line` | `library_string` | `{version}, {any}-{any}-20{any}` | `bzlib_private.h` | | `pattern` | `bzip:bzip2` | … |
+| `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | | `single_line` | `build_path` | `{any}/openjpeg-{version}/{any}` | | | | `uclouvain:openjpeg` | … |
+| `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | | `single_line` | `bare_version` | `{version}` | `src/lib/openjp2/opj_config_private.h.cmake.in` | | | `uclouvain:openjpeg` | … |
+| `libwebp` | `libwebp` | `https://chromium.googlesource.com/webm/libwebp` | `v{version}` | | `single_line` | `version_function_machine_code` | `WebPGetDecoderVersion -> bits *.8.8` | `src/dec/vp8_dec.c` | | | `webmproject:libwebp` | … |
+| `libfreetype` | `freetype` | `https://gitlab.freedesktop.org/freetype/freetype` | `VER-{version}` | | `single_line` | | | | | | `freetype:freetype` | |
+| | `zlib` | `https://github.com/madler/zlib` | `v{version}` | `\d+\.\d+\.\d+\.\d+` | `single_line` | | | | | `detector` | `zlib:zlib` | |
+| `libgfortran` | `skip` | | | | | | | | | | | |
 
 - **prefix** is how a file is found, **library** is what it turns out to
   be, and **cpe** and **osv** are how advisories name it. The three
   differ: no advisory says `libz`, and zlib-ng's CVEs name zlib-ng, not
-  zlib.
+  zlib. **prefix** is empty only on a `detector` row (see
+  **static_lib_detection**), which names no `.libs/` file.
 - A prefix can map to several libraries (`libz` may be zlib or zlib-ng in
   compat mode, and Pillow's `libfreetype` has bzip2 compiled into it). The
   prefix picks which recognizers to try; the strings and version functions
@@ -759,7 +776,7 @@ the package list. One row per prefix, library and way of identifying it:
   later; otherwise `single_line`. When each line reached its end of life
   is in [Lines' ends of life](#lines-ends-of-life).
 - Rows for one library agree on **repo**, **tags**, **not_release**,
-  **line**, **cpe** and **osv**.
+  **line**, **cpe** and **osv**, and on whether they are `detector` rows.
 - **kind** is one of the version-setting kinds in
   [How versions are identified](#how-versions-are-identified), and
   **pattern** is the recognizer:
@@ -786,6 +803,26 @@ the package list. One row per prefix, library and way of identifying it:
   version string and has no version function that can be read
   (roadmap 4.4). Under one prefix, a library has either recognizer rows or
   one such row. Phase 08 has nothing to run for it, and 4.5 reports it.
+- **static_lib_detection** records the maintainer's judgment, from
+  reading upstream source, that a match proves a binary contains the
+  library: the string is the library's own and can't be a header string
+  (roadmap T.2). It is one of:
+  - `pattern`: the row's pattern qualifies, and its matches in binaries
+    outside `.libs/` become `static_lib` records (phase 10). Only a
+    `library_string` or `build_path` row can have it. bzip2's row does.
+  - `detector`: the library's hand-written detector qualifies. The row
+    gives phase 06 and the staleness report the library's **repo**,
+    **tags**, **not_release**, **line** and **cpe**, and phase 06 clones
+    it like any other. It has no **prefix** and no **kind**, and its
+    library must be one a hand-written detector finds: zlib's row is the
+    only one. zlib's four-part versions, such as 1.3.1.2, whose
+    `zlib.h` says `1.3.1.2-audit`, are tags between releases, not
+    releases, so its **not_release** is `\d+\.\d+\.\d+\.\d+`.
+  - empty: the row's matches never become `static_lib` records, though
+    they are still candidates in the static discovery report.
+
+  A `skip` row leaves it empty. Matches in `.libs/` files don't depend
+  on it: phase 08 runs every recognizer row.
 - **cpe** is how NVD names the library: each vendor and product NVD
   uses for the library's upstream project, joined by `:`, such as
   `webmproject:libwebp`, each in lowercase letters, digits, `_`, `.`,
@@ -838,9 +875,12 @@ since a wheel on a maintained line, such as OpenSSL 3.5, has its
 security fixes without moving to a newer one.
 
 Once phases 01, 06 and 08 are finished, every run rewrites
-`staleness-report.md` in the episode from phases 01, 05, 06 and 08, as
-it rewrites the fingerprint report, reading the library map and
-[Lines' ends of life](#lines-ends-of-life) too. Phase files don't change, apart
+`staleness-report.md` in the episode from phases 01, 05, 06 and 08, and
+10 once it is finished, as it rewrites the fingerprint report, reading
+the library map and [Lines' ends of life](#lines-ends-of-life) too.
+Until phase 10 is finished, or while its lines predate `static_lib`
+records, the report has no static rows and says why in its counts.
+Phase files don't change, apart
 from the tag dates and release flags phase 06 records. An episode whose
 phase 06 lines predate tag dates or release flags compares no library: the report says to rerun from
 phase 06, in its counts and as each library's reason.
@@ -884,20 +924,34 @@ the fingerprint report shows them, the newest release at upload with
 its date, the number of newer releases and the days behind, then the
 line, its status, the newest release on it at upload with its date and
 the days behind on it. A row whose
-basis is `bare_version` is marked as a hint, as everywhere else.
+basis is `bare_version` is marked as a hint, as everywhere else. Every
+row shows its record's linkage. After the `.libs/` rows come the
+package's `static_lib` records from phase 10, one row each, in the same
+format, named by the member that holds the library, such as
+`lxml/etree.cpython-312-x86_64-linux-gnu.so`. A binary with no record
+has no row; its candidates are in the static discovery report. A
+package whose phase 10 line isn't `ok` says so in place of its static
+rows.
 
 Any other row is listed as not compared, never as current, with the
-reason: the fingerprint report's reason for having no version;
+reason: the fingerprint report's reason for having no version, such
+as `matches disagree` for a record whose matches give different
+versions, as playwright's two copies of zlib in `driver/node` do;
 the reason phase 06 failed the library;
 or no release tag for the version, such as OpenBLAS's
-`0.3.34.106.0`. Its line columns are `—`. A prefix marked `skip` is listed as skipped. A package
+`0.3.34.106.0` and grpcio's zlib `1.3.1.1`. Its line columns are `—`. A prefix marked `skip` is listed as skipped. A package
 that wasn't scanned shows the phase where it stopped and that phase's
 reason, as in the fingerprint report.
 
 The report starts with counts: libraries compared, current and behind,
 by basis, then current and behind on their line, by basis, and by line
 status, and libraries not compared, by reason, so a reader sees how
-much of the substrate the numbers cover.
+much of the substrate the numbers cover. Packages not scanned are a
+count of packages, given once. The other counts are given once per
+linkage present, `shared_lib` first and then `static_lib`, with no
+combined total, so the `.libs/` numbers stay comparable with reports
+from before static rows. The `static_lib` counts end with the packages
+whose phase 10 line isn't `ok`.
 
 Rules:
 
@@ -969,7 +1023,10 @@ Phase 08 reads only `.libs/` files. Phase 10 and the static discovery
 report show what a wheel's other binaries hold, mostly its extension
 modules, so the maintainer can choose which statically linked libraries
 to detect (roadmap T.2). This is a measurement, not detection: a
-candidate is not a fingerprint record and not a finding.
+candidate is not a fingerprint record and not a finding. Phase 10 also
+writes `static_lib` fingerprint records from the candidates' sources
+that the library map qualifies (roadmap T.3); those are detection, as
+phase 08's records are.
 
 `10-static` (per package) covers every ELF binary in phase 04 except the
 `.libs/` files phase 05 lists. For each binary it lists candidates from
@@ -979,9 +1036,9 @@ two sources:
   recognizers match, compiled from phase 07's lines as phase 08 compiles
   them, among the binary's strings in phase 04's records that pass the
   noise filter;
-- the hand-written zlib detector (roadmap 2.1), since zlib has no map
-  row, run over the binary's bytes, read from the wheel at phase 02's
-  path. Each string of a `contains` result's basis is a candidate, with
+- the hand-written zlib detector (roadmap 2.1), since zlib has no
+  recognizer row, run over the binary's bytes, read from the wheel at
+  phase 02's path. Each string of a `contains` result's basis is a candidate, with
   that basis as its kind and its own string's version, so two zlib
   copies in one binary keep both versions. A string the derivative rule
   reattributes, such as zlib's banners beside zlib-ng's own string,
@@ -998,6 +1055,20 @@ phase 10 needs the wheel cache. `bare_version` and
 `.libs/` file, a bare version on its prefix and a version function on
 the file's exported symbols.
 
+Beside its candidates, each binary in phase 10's line has a
+`fingerprints` list: `fingerprint` records with linkage `static_lib`,
+built from the matches of the map rows whose **static_lib_detection** is
+`pattern`, and of the zlib detector when the map has a `detector` row
+for one of its libraries (see [The library map](#the-library-map)).
+They go through the same record builder as phase 08's, so the
+derivative rule and the conflict rule apply unchanged: two copies of
+zlib in one binary, such as playwright's `driver/node`, give one record
+with version `null` and `conflict` `true`, while the candidates keep
+both versions. Only `contains` records are written; a header string
+alone shows nothing about what a binary holds. The record fields are
+those of [How versions are identified](#how-versions-are-identified),
+and the line's `schema_version` is 2.
+
 Once phase 10 is finished, every run rewrites `static-report.md` in the
 episode from phases 04, 05 and 10, as it rewrites the fingerprint
 report, reading the library map and the list of ambiguous versions too.
@@ -1007,7 +1078,8 @@ deleted.
 The report starts with counts: packages scanned in phase 10, and those
 not scanned, by the phase where they stopped; binaries outside
 `.libs/`; candidates by library and by kind; candidates marked header
-string risk; and distinct templates.
+string risk; candidates that became `static_lib` records, those whose
+string is in a record's evidence; and distinct templates.
 
 **Candidates.** For each package, each candidate with its member,
 library, version, kind and matched string, labeled "unconfirmed static
@@ -1024,7 +1096,7 @@ give different versions.
   mark comes from the map when the report is written.
 - A candidate names the library whose row matched. The derivative rule
   (see [How versions are identified](#how-versions-are-identified))
-  applies when T.3 turns candidates into records, not here.
+  applies to the `static_lib` records, not here.
 
 A package that wasn't scanned in phase 10 shows the phase where it
 stopped and that phase's reason, as in the fingerprint report.
@@ -1305,17 +1377,33 @@ written for it.
     crate whose status as a C library is open; the OpenSSL-style object
     names show presence only.
   - geos: `capi/geos_c.h.in` is a public header.
-- **T.3** Static records. Fingerprint output gets records for T.2's
-  patterns in binaries outside `.libs/`, marked as static, and the
-  staleness report gets rows for them. The derivative rule applies to
-  them as it does to `.libs/` files. The record fields, the
-  `schema_version` bump and how static rows are counted are settled
-  after T.2. The library map gets a **static** column: `yes` marks a
-  row whose pattern qualifies under T.2's rule (bzip2's row now), and
-  the zlib detector qualifies by code. ← current
+- **T.3** ✓ Static records. Every fingerprint record gets a **linkage**,
+  where the library was found: `shared_lib` in a `.libs/` file through
+  its prefix (all of phase 08's), or `static_lib` in a binary outside
+  `.libs/` (see [How versions are identified](#how-versions-are-identified)).
+  It is a closed set, and every reader fails on a value it doesn't know.
+  Phase 10 writes the `static_lib` records, in a `fingerprints` list
+  beside each binary's candidates, through the same record builder, so
+  the derivative and conflict rules apply unchanged; no phase is
+  renumbered. Fingerprint records' `schema_version` goes to 4 and phase
+  10's lines' to 2. The library map gets a **static_lib_detection**
+  column, after **identity**: `pattern` on bzip2's row, and `detector`
+  on a new zlib row with no prefix, which gives phase 06 and the
+  staleness report zlib's repository, tags, release rule, line and CPE
+  name. The staleness report reads phase 10 too, lists static rows after
+  each package's `.libs/` rows, shows each row's linkage, and counts
+  each linkage apart. The static discovery report counts the candidates
+  that became records. Tests use hand-built phase lines and synthetic
+  wheels. Manual check: rerun `stale100` from phase 06 with
+  `--stop-after 10`; lxml 6.1.3's zlib 1.3.2 in `lxml/etree` and
+  `lxml/objectify` is compared, grpcio 1.84.0's zlib 1.3.1.1 is not
+  compared for lack of a release tag, playwright's `driver/node` gives
+  one zlib record with a conflict, pyarrow's bzip2 1.0.8 in
+  `libarrow.so.2600` and pymupdf's zlib 1.3.2 in `libmupdf.so.28.2` are
+  compared, and the `shared_lib` counts match the earlier report's.
 - **T.4** The top 500: the package list loader's 100-row cap (roadmap
   3.2) is lifted, `scripts/top_packages.py` stops at 500, and a full run
-  scans them.
+  scans them. ← current
 
 ### Mini-roadmap: staleness of bundled libraries
 
@@ -1728,10 +1816,34 @@ again only rows.
   presence only.
 - **zlib versions that aren't releases.** 1.3.0.1, 1.3.1.1 and 1.3.2.1
   are develop-branch versions, and playwright's node carries Chromium's
-  zlib. Neither maps to a release tag for CVE ranges.
+  zlib. Neither maps to a release tag for CVE ranges. zlib's map row
+  marks four-part versions `not_release` (`\d+\.\d+\.\d+\.\d+`): its
+  repository has a `v1.3.1.2` tag, whose `zlib.h` says `1.3.1.2-audit`,
+  and which isn't a release on GitHub, so it never makes a wheel look
+  behind.
 - **Statically linked libraries with no `.libs/` prefix.** Map rows are
-  keyed by prefix, so a library seen only statically, such as aws-lc,
-  has no row to hang a recognizer on.
+  keyed by prefix. A `detector` row (roadmap T.3) covers a library a
+  hand-written detector finds, as zlib's does, but a library that would
+  be found by a pattern alone and is seen only statically, such as
+  aws-lc, still has no row to hang a recognizer on.
+- **Several copies of one library in one binary.** playwright's
+  `driver/node` carries zlib 1.3.2.1 and 1.3.0.1. Its `static_lib`
+  record keeps both copies' banners in its evidence and has version
+  `null` and `conflict` `true`, so the staleness report doesn't compare
+  it, and `static-report.md` lists both versions as candidates.
+  Splitting it into one record per copy needs a rule for pairing each
+  `deflate` banner with its `inflate` banner.
+- **Libraries compiled into another `.libs/` file.** Linkage is by
+  location, so every phase 08 record is `shared_lib`, including
+  Pillow's bzip2, which is compiled into `libfreetype`, not a `.libs/`
+  file of its own. Telling the two apart needs the library map to say
+  which library a `.libs/` file is, not only which libraries it may
+  hold.
+- **zlib-ng static records have no map row.** The zlib detector's
+  derivative rule can give a `static_lib` record for zlib-ng, but
+  zlib-ng has no map row, so the staleness report lists it as not
+  compared, `not in phase 06`. No wheel in the top-100 run has one. A
+  `detector` row for zlib-ng would bring it in.
 - **geos's header string outside `.libs/`.** `{version}-CAPI-{any}`
   comes from `capi/geos_c.h.in`, so it can't qualify for static
   detection.
