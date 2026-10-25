@@ -1820,3 +1820,93 @@ def test_stop_during_part_3_leaves_no_phase_10(
     assert run(dirs, "--count", "3") == EXIT_INTERRUPTED
     assert (dirs.episode / "09-sboms.jsonl.partial").is_file()
     assert not list(dirs.episode.glob("10-*"))
+
+
+@pytest.mark.parametrize("value", ["9", "00", "11", "ab"])
+def test_stop_after_takes_only_a_phase_number(
+    dirs: Dirs, value: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        run(dirs, "--count", "3", "--stop-after", value)
+    assert exc.value.code == 2
+    assert "--stop-after: invalid choice" in capsys.readouterr().err
+    assert not dirs.episode.exists()
+
+
+def test_stop_after_a_part_1_phase_then_carry_on(
+    dirs: Dirs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(dirs, "--count", "3", "--stop-after", "02") == 0
+    err = capsys.readouterr().err
+    assert err.endswith("02-fetch: 1 ok, 2 skipped, 0 error\nstopped after 02-fetch\n")
+    files = sorted(path.name for path in dirs.episode.iterdir())
+    assert files == ["01-resolve.jsonl", "02-fetch.jsonl", "episode.json"]
+
+    # Phase 02 is already finished: no phase runs.
+    assert run(dirs, "--count", "3", "--stop-after", "02") == 0
+    err = capsys.readouterr().err
+    assert err.endswith("02-fetch: already finished, skipped\nstopped after 02-fetch\n")
+    assert not (dirs.episode / "03-inspect.jsonl").exists()
+
+    # --stop-after isn't in episode.json, so a run without it carries on.
+    assert run(dirs, "--count", "3") == 0
+    err = capsys.readouterr().err
+    assert "03-inspect: 0 ok, 2 skipped, 1 error" in err
+    assert "stopped" not in err
+    assert err.endswith("10-cves: 0 ok, 0 skipped, 0 error\n")
+
+
+def test_manual_step_before_stop_after_still_exits_3(
+    dirs: Dirs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(scan_module, "phases", stub_phases)
+    assert run(dirs, "--count", "3", "--stop-after", "09") == 3
+    err = capsys.readouterr().err
+    assert err.endswith("  libpng16\n  libgfortran\n")
+    assert "stopped" not in err
+    assert not list(dirs.episode.glob("06-*"))
+
+
+def test_stop_after_writes_the_reports_finished_phases_allow(
+    dirs: Dirs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(scan_module, "phases", stub_phases)
+    repo = make_repo(dirs.episode.parent / "libpng", {"v1.6.58": {}})
+    png = f"libpng16,libpng,{repo},v{{version}},,single_line,library_string,"
+    png += "libpng version {version},p.c,,none,"
+    header = ",".join(COLUMNS)
+    dirs.map.write_text(f"{header}\n{png}\nlibgfortran,skip,,,,,,,,,,\n")
+
+    assert run(dirs, "--count", "3", "--stop-after", "08") == 0
+    err = capsys.readouterr().err
+    assert err.endswith(
+        "08-fingerprint: 2 ok, 1 skipped, 0 error\nstopped after 08-fingerprint\n"
+    )
+    assert (dirs.episode / "fingerprint-report.md").is_file()
+    assert (dirs.episode / "staleness-report.md").is_file()
+    assert not (dirs.episode / "sbom-report.md").exists()
+    assert not list(dirs.episode.glob("09-*")) + list(dirs.episode.glob("10-*"))
+    assert not list(dirs.episode.glob("*.partial"))
+
+    # Phase 08 is already finished: no phase runs, and the reports are
+    # rewritten.
+    (dirs.episode / "staleness-report.md").unlink()
+    assert run(dirs, "--count", "3", "--stop-after", "08") == 0
+    err = capsys.readouterr().err
+    assert err.endswith(
+        "08-fingerprint: already finished, skipped\nstopped after 08-fingerprint\n"
+    )
+    assert (dirs.episode / "staleness-report.md").is_file()
+
+    # Stopping after part 2's last phase or phase 10.
+    (dirs.episode / "08-fingerprint.jsonl").unlink()
+    assert run(dirs, "--count", "3", "--stop-after", "07") == 0
+    assert capsys.readouterr().err.endswith(
+        "07-recognizers: already finished, skipped\nstopped after 07-recognizers\n"
+    )
+    assert not (dirs.episode / "08-fingerprint.jsonl").exists()
+    assert run(dirs, "--count", "3", "--stop-after", "10") == 0
+    err = capsys.readouterr().err
+    assert "09-sboms: 2 ok, 1 skipped, 0 error" in err
+    assert err.endswith("10-cves: 0 ok, 1 skipped, 0 error\nstopped after 10-cves\n")
+    assert (dirs.episode / "sbom-report.md").is_file()

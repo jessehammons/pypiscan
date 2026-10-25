@@ -9,7 +9,7 @@ from pypiscan.fetch import fetch_release
 from pypiscan.fingerprint import fingerprint_wheel
 from pypiscan.package_list import check_release
 from pypiscan.pypi import HttpClient, PyPIError, UrllibClient
-from pypiscan.scan import EXIT_PREFLIGHT, scan
+from pypiscan.scan import EXIT_PREFLIGHT, PHASE_NUMBERS, scan
 from pypiscan.wheel_inspect import WheelError, inspect_wheel
 from pypiscan.wheel_sboms import sboms_wheel
 from pypiscan.wheel_strings import strings_wheel
@@ -134,6 +134,12 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
         type=int,
         help="Required. Scan the first N packages (clamped to the list's length).",
     )
+    p_scan.add_argument(
+        "--stop-after",
+        choices=PHASE_NUMBERS,
+        metavar="NN",
+        help="Stop once phase NN (01 to 10) is finished, with exit 0.",
+    )
     args = parser.parse_args(argv)
     if args.command == "scan":
         if None in (args.count, args.ambiguous_versions, args.cve_table, args.line_eol):
@@ -152,6 +158,7 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
             args.count,
             client or UrllibClient(),
             sys.stderr,
+            stop_after=args.stop_after,
         )
     if args.command == "fetch":
         return fetch(args.release, args.cache_dir, client or UrllibClient())
