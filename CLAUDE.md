@@ -17,7 +17,7 @@
   skipping CI steps (this includes `# noqa`, `# type: ignore` and
   `# pragma: no cover` added only to get green). If a check can't be met
   properly, leave it failing and explain the problem in the PR description.
-- Keep non-test changes under about 500 lines per pull request. If an item
+- Keep non-test changes under about 1,000 lines per pull request. If an item
   needs more, stop and say so in the PR rather than growing it.
 - Call out any change to CI, `scripts/check.sh` or tool configuration
   (`pyproject.toml` tool sections, `.pre-commit-config.yaml`, workflows) in

@@ -45,9 +45,11 @@ In scope:
 - A curated [CVE table](#the-cve-table) covering high and critical CVEs
   from 2020 onward for those libraries, found through NVD.
 
+Statically linked libraries were out of scope for version 1 and are
+its next step (see
+[Mini-roadmap: statically linked libraries](#mini-roadmap-statically-linked-libraries)).
 Out of scope for version 1, and listed under [Later](#later-tbd):
-statically linked libraries, and time-to-patch (how long wheels kept
-shipping an affected version).
+time-to-patch (how long wheels kept shipping an affected version).
 
 Also out of scope for version 1: macOS, Windows, ARM and musl wheels; source
 distributions; conda packages; automated disclosure; automated parsing of
@@ -181,7 +183,9 @@ header, such as OpenSSL's `OPENSSL_VERSION_TEXT` and harfbuzz's
 `HB_VERSION_STRING`, so the same string can be a header string in code
 that calls the library. In a `.libs/` file whose prefix the library map
 ties to that library it is the library's own, and recognizers only run on
-such files (phase 08).
+such files (phase 08). Phase 10 runs some of them on the other binaries,
+where a match is only an unconfirmed candidate (see
+[The static discovery report](#the-static-discovery-report)).
 
 An exported symbol's presence and `DT_SONAME` are not version evidence.
 What a version function's machine code returns is.
@@ -201,7 +205,8 @@ that also holds a token of two to five parts, such as `ANSI X9.62`, is
 kept, along with a few five-part spec references and OIDs. The noise list
 grows as the library report shows more.
 `strings` output and phase 04 keep everything; the filter applies where
-strings are used, in the library report (phase 05) and in matching.
+strings are used, in the library report (phase 05), in matching (phases
+08 and 10) and in the static discovery report.
 
 Rules for recognizers:
 
@@ -530,15 +535,19 @@ stopped and that phase's reason, as in the fingerprint report.
 `scan` runs every package on a committed list through a fixed sequence of
 phases, finishing each phase before starting the next. It covers breadth:
 the latest release of many packages, and only the shared libraries bundled
-in their `<package>.libs/` directories. Statically linked libraries and
-time-to-patch are [Later](#later-tbd).
+in their `<package>.libs/` directories. Statically linked libraries are
+the [mini-roadmap](#mini-roadmap-statically-linked-libraries), which
+starts with phase 10 and
+[the static discovery report](#the-static-discovery-report).
+Time-to-patch is [Later](#later-tbd).
 
 A scan runs in two parts with a manual step between them. Part 1 finds the
 bundled libraries; the maintainer then says, in the
 [library map](#the-library-map), which upstream project each one comes
 from and how to recognize it; part 2 clones those projects, builds
-recognizers from the map, reads the wheels' SBOMs and matches the
-versions it finds against CVEs.
+recognizers from the map, reads the wheels' SBOMs, lists candidates for
+statically linked libraries and matches the versions it finds against
+CVEs.
 The same command runs both parts: a rerun skips finished phases, so after
 the map is edited, `scan` picks up at phase 06.
 
@@ -565,10 +574,10 @@ pypiscan scan <package-list> --library-map M --ambiguous-versions A \
   of life, normally `data/line_eol.csv` (see
   [Lines' ends of life](#lines-ends-of-life)).
 - `--stop-after` is optional and takes a phase's two-digit number, 01 to
-  10; any other value exits 2. `scan` runs through phase NN, skipping
+  11; any other value exits 2. `scan` runs through phase NN, skipping
   finished phases, writes the reports the finished phases allow, prints
   `stopped after NN-<phase>` to stderr after the counts and exits 0, so a
-  manual check needn't wait out phase 10. If phase NN is already
+  manual check needn't wait out phase 11. If phase NN is already
   finished, no phase runs and the reports are rewritten. The manual step
   still stops a run before NN with exit 3. It isn't recorded in
   `episode.json`, so a later run without it carries on from phase NN+1.
@@ -631,14 +640,14 @@ Part 2:
 6. `06-upstream` (network, per library): clone the repository of every
    library the map names, with a recognizer or not, into the cache, or
    fetch into the existing clone (see [Conventions](#conventions)). The
-   clone is needed for fixed versions (phase 10). The line lists the
+   clone is needed for fixed versions (phase 11). The line lists the
    tags the library's **tags** matches, each with the version it names,
    its date, the day `git for-each-ref` gives as `%(creatordate:short)`
    (see [The CVE table](#the-cve-table)), and `release`, whether it is a
    release by the map's rule (see [The library map](#the-library-map)),
    which the staleness report and the range verifier (6.3) read. A library whose **tags** matches no tag
    is an `error` line, so a
-   wrong repo or a misspelled pattern shows up before phase 10 relies on
+   wrong repo or a misspelled pattern shows up before phase 11 relies on
    it. A host that can't be reached gives an `error` line too.
 7. `07-recognizers` (per library): build a recognizer from each of the
    library's rows that has a kind (see
@@ -677,12 +686,17 @@ Part 2:
    Once phase 09 is finished, every run rewrites `sbom-report.md` in the
    episode (see
    [Comparing SBOMs with fingerprints](#comparing-sboms-with-fingerprints)).
-10. `10-cves` (network, per library): candidate CVEs from NVD, by each
+10. `10-static` (per package): unconfirmed candidates for statically
+    linked libraries in the wheel's binaries outside `.libs/` (see
+    [The static discovery report](#the-static-discovery-report)). Once
+    phase 10 is finished, every run rewrites `static-report.md` in the
+    episode.
+11. `11-cves` (network, per library): candidate CVEs from NVD, by each
     of the library's CPE names (see
     [Candidates from NVD](#candidates-from-nvd)). It reads neither the
     CVE table nor phase 06's clone: candidates are drafts, and the range
     verifier (6.3) checks the table's fixes in the clone.
-11. `11-match` (per package): each library version that falls inside a
+12. `12-match` (per package): each library version that falls inside a
     CVE's affected range, with its evidence level. A match is a candidate
     for investigation, not a finding.
 
@@ -941,12 +955,80 @@ Rules:
   interrupted was the last. The next run stops at pre-flight until the
   file is deleted.
 - **One phase at a time, no retries.** An `error` line stands. Only phases
-  01, 02, 06 and 10 use the network, through an HTTP client (or, for 06,
+  01, 02, 06 and 11 use the network, through an HTTP client (or, for 06,
   the git command) that tests replace with recorded responses or a
   synthetic repository.
 - When every phase finishes, `scan` exits 0, even if some lines are
   `error`: errors are data. It exits 3 when it stops for the manual step.
   Counts by status go to stderr, and nothing goes to stdout.
+
+### The static discovery report
+
+Phase 08 reads only `.libs/` files. Phase 10 and the static discovery
+report show what a wheel's other binaries hold, mostly its extension
+modules, so the maintainer can choose which statically linked libraries
+to detect (roadmap T.2). This is a measurement, not detection: a
+candidate is not a fingerprint record and not a finding.
+
+`10-static` (per package) covers every ELF binary in phase 04 except the
+`.libs/` files phase 05 lists. For each binary it lists candidates from
+two sources:
+
+- strings that the library map's `library_string` and `build_path`
+  recognizers match, compiled from phase 07's lines as phase 08 compiles
+  them, among the binary's strings in phase 04's records that pass the
+  noise filter;
+- the hand-written zlib detector (roadmap 2.1), since zlib has no map
+  row, run over the binary's bytes, read from the wheel at phase 02's
+  path. Its `contains` results are candidates, with their basis as the
+  kind; its `compiled_against` results are not.
+
+Each candidate records the library, the version, the kind, the matched
+string, and its file offset and ELF section. Each file phase 10 reads
+must match phase 04's sha256. A missing wheel or member, a changed file
+or an ELF pyelftools can't parse makes the package's line `error`, so
+rerunning phase 10 needs the wheel cache. `bare_version` and
+`version_function_machine_code` rows don't run here: both rest on a
+`.libs/` file, a bare version on its prefix and a version function on
+the file's exported symbols.
+
+Once phase 10 is finished, every run rewrites `static-report.md` in the
+episode from phases 04, 05 and 10, as it rewrites the fingerprint
+report, reading the library map and the list of ambiguous versions too.
+It reads no wheel, so editing the map or the list needs no phase file
+deleted.
+
+The report starts with counts: packages scanned in phase 10, and those
+not scanned, by the phase where they stopped; binaries outside
+`.libs/`; candidates by library and by kind; candidates marked header
+string risk; and distinct templates.
+
+**Candidates.** For each package, each candidate with its member,
+library, version, kind and matched string, labeled "unconfirmed static
+candidate", with an ambiguous version marked as the fingerprint report
+marks it.
+
+- A candidate whose map row's **identity_file** is a header (`.h` or
+  `.h.in`), such as OpenSSL's `include/openssl/opensslv.h.in` and
+  libtiff's `libtiff/tiffvers.h.in`, is also marked "header string
+  risk". A string defined in a public header can be a header string in
+  any binary that calls the library, and a header string shows what a
+  binary was compiled against, not that it contains the library. The
+  mark comes from the map when the report is written.
+- A candidate names the library whose row matched. The derivative rule
+  (see [How versions are identified](#how-versions-are-identified))
+  applies when T.3 turns candidates into records, not here.
+
+A package that wasn't scanned in phase 10 shows the phase where it
+stopped and that phase's reason, as in the fingerprint report.
+
+**Templates.** From phase 04: the templates of every string in those
+binaries that passes the noise filter, with templates longer than 200
+characters cut to 200, as in the library report. They are ranked by how
+many wheels carry them, then by how many binaries, then alphabetically,
+each with one real example string, its wheel and member, and the
+packages carrying it. Every template is listed; review reads from the
+top.
 
 ## The CVE table
 
@@ -1084,7 +1166,7 @@ phase 06's clone: the range verifier (6.3) checks them.
 
 ### Candidates from NVD
 
-Phase 10 drafts candidates for the table: for each library, every CVE
+Phase 11 drafts candidates for the table: for each library, every CVE
 that NVD's API returns for one of its CPE names and that NVD published
 on or after 2020-01-01. Candidates stay in the episode. The table is
 edited by hand (roadmap 6.4), and nothing is copied into it.
@@ -1096,7 +1178,7 @@ and its CVE-2025-69277, which NVD has deferred, has no product list.
 Nor has libpq's CVE-2025-1094, which its CNA scored `HIGH` (see "Other
 advisory sources" under [Later](#later-tbd)).
 
-For each name in the library's **cpe**, phase 10 asks NVD's CVE API
+For each name in the library's **cpe**, phase 11 asks NVD's CVE API
 for `virtualMatchString=cpe:2.3:a:<vendor>:<product>` with
 `resultsPerPage=2000`, the most the API allows, and pages with
 `startIndex` until it has `totalResults` CVEs. It sends no dates, since
@@ -1147,11 +1229,11 @@ and checked by hand. A rejected CVE has no product list, so a query by
 CPE never returns it; CVE-2023-5129 is reached only as a
 **duplicates** entry.
 
-Phase 10 reads neither the CVE table nor phase 06's clone, so editing
+Phase 11 reads neither the CVE table nor phase 06's clone, so editing
 the table needs no phase file deleted. Its candidates are a snapshot of
-NVD: to take a new one, delete `10-cves.jsonl` and every later phase
+NVD: to take a new one, delete `11-cves.jsonl` and every later phase
 file. A changed **cpe** changes the map, so pre-flight check 5 already
-names phase 10's file. Which candidates the table lists is for a
+names phase 11's file. Which candidates the table lists is for a
 report that reads the table on every run (roadmap 6.3).
 
 ## Roadmap
@@ -1161,6 +1243,51 @@ Each item is one pull request (see
 implemented in about 20–30 agent turns and reviewed on a phone. Items marked
 *(maintainer input)* need a decision before any code is written. Done items
 are marked ✓.
+
+### Mini-roadmap: statically linked libraries
+
+The staleness mini-roadmap's full top-100 run compared 27 libraries. On
+their own release lines, 22 were current and 5 behind: one by a day, and
+four that are a CentOS 7 build image's distribution packages. No
+`.libs/` prefix appears in more than 2 of the 100 wheels, so bundled
+shared libraries live in about a dozen packages. The larger layer is
+code compiled into extension modules, which version 1 doesn't see: zlib
+in lxml and grpcio, OpenSSL in cryptography, and the C libraries behind
+Rust `-sys` crates. This mini-roadmap comes before a scientific-stack
+package list and a top-500 scan. It starts with a measurement, T.1,
+which shows how much static code there is before any recognizer is
+written for it.
+
+- **T.1** Phase 10 and the static discovery report, as described in
+  [The static discovery report](#the-static-discovery-report). The CVE
+  phase becomes 11 and matching 12, so an episode stopped after phase 09
+  needs no phase file deleted, and `--stop-after` takes 01 to 11. Tests
+  use hand-built phase lines and synthetic wheels. Manual check: rerun
+  the full top-100 episode (`stale100`) with `--stop-after 10`; only
+  phase 10 runs. The candidates include lxml 6.1.3's zlib 1.3.2 in
+  `lxml/etree` and `lxml/objectify`, and grpcio 1.84.0's zlib 1.3.1.1 in
+  `grpc/_cython/cygrpc`, 2.1's known answers. Review reads the counts,
+  the candidates and about the top 100 templates. ← current
+- **T.2** *(maintainer input)* Which libraries to detect in binaries
+  outside `.libs/`, and with which patterns, chosen from T.1's report and
+  the wheels' SBOM claims (see [SBOMs in wheels](#sboms-in-wheels)):
+  cryptography 50.0.2 carries a second SBOM naming OpenSSL 4.0.3, and
+  cargo-cyclonedx lists `-sys` crates for C libraries, such as
+  `zstd-sys 2.0.16+zstd.1.5.7` in polars-runtime-32 2.0.0 and
+  `aws-lc-sys` in several wheels. These claims say where to look and
+  never set a version. Only a pattern whose string can't be a header
+  string qualifies: a string from a library's public header, such as
+  OpenSSL's, shows what a binary was compiled against, not that it
+  contains the library.
+- **T.3** Static records. Fingerprint output gets records for T.2's
+  patterns in binaries outside `.libs/`, marked as static, and the
+  staleness report gets rows for them. The derivative rule applies to
+  them as it does to `.libs/` files. The record fields, the
+  `schema_version` bump and how static rows are counted are settled
+  after T.2.
+- **T.4** The top 500: the package list loader's 100-row cap (roadmap
+  3.2) is lifted, `scripts/top_packages.py` stops at 500, and a full run
+  scans them.
 
 ### Mini-roadmap: staleness of bundled libraries
 
@@ -1492,7 +1619,7 @@ again only rows.
   for libwebp. Manual check: a full episode rerun from phase 06 after
   the map change writes the same reports as before, and a table whose
   fix tag libwebp's **tags** doesn't match stops pre-flight.
-- **6.2** ✓ Phase 10, candidate CVEs from NVD, as described in
+- **6.2** ✓ Phase 10 (now 11), candidate CVEs from NVD, as described in
   [Candidates from NVD](#candidates-from-nvd): a query by each of a
   library's CPE names, and every candidate published from 2020-01-01
   on, with its scope, scores, ranges and patch links verbatim. **cpe**
@@ -1506,7 +1633,7 @@ again only rows.
   introducing commit, compute the release tags that contain them and
   their dates; compare against the table's tags and dates and NVD's
   ranges, and flag disagreements. Tests use a small synthetic git
-  repository. A CVE report, rewritten every run from phase 10 and the
+  repository. A CVE report, rewritten every run from phase 11 and the
   table, shows each candidate and whether the table lists it, as a row
   or a **duplicates** entry, beside the verifier's flags. *(Paused for
   the [mini-roadmap](#mini-roadmap-staleness-of-bundled-libraries).)*
@@ -1518,7 +1645,7 @@ again only rows.
 
 ### 7. Matching
 
-- **7.1** Phase 11, `match`: compare fingerprints against the CVE table and
+- **7.1** Phase 12, `match`: compare fingerprints against the CVE table and
   write candidates with their evidence level into the episode, which is
   outside the repository. Each candidate shows the basis of its version,
   and one whose basis is `bare_version` is marked as needing another source
@@ -1536,19 +1663,12 @@ again only rows.
 
 ### Later (TBD)
 
-- **Statically linked libraries.** Library code compiled into extension
-  modules rather than shipped in `.libs/`: zlib in lxml and grpcio,
-  OpenSSL in cryptography. There is no filename to start from, so
-  discovery has to work from `strings` across every binary, and header
-  strings (`compiled_against`) must not be mistaken for the library itself.
-  A pattern whose string comes from the library's public header, such as
-  OpenSSL's, can't show the library is present outside its own `.libs/`
-  file. Much more involved than the shared-library case. Some wheels'
-  SBOMs say where to look (see [SBOMs in wheels](#sboms-in-wheels)):
-  cargo-cyclonedx lists `-sys` crates for C libraries, such as
-  `zstd-sys 2.0.16+zstd.1.5.7` in polars-runtime-32 2.0.0 and
-  `aws-lc-sys` in several wheels, and cryptography 50.0.2 carries a
-  second SBOM naming OpenSSL 4.0.3. These are claims, not measurements.
+- **Header string risk from identity_file alone.** The static
+  discovery report marks a candidate as header string risk when its
+  row's **identity_file** is a header. bzip2's `bzlib_private.h` is a
+  private header no caller includes, so its candidates are marked
+  though they can't be header strings. A per-row rule for public
+  headers would fix it.
 - **Checking patterns at every release tag.** Statically linked libraries
   and time-to-patch need older releases, whose strings can be worded
   differently: before 2.1.0, zlib-ng named and worded its identity string
@@ -1668,7 +1788,8 @@ again only rows.
   the library map's. Pillow's is generated from the build scripts
   that are already the answer key, so it adds no independent source.
   Rust extensions' SBOMs name crates compiled in statically, which
-  waits for "Statically linked libraries".
+  T.2 reads as claims (see
+  [Mini-roadmap: statically linked libraries](#mini-roadmap-statically-linked-libraries)).
 - **Other advisory sources.** Version 1 finds CVEs through NVD alone, by
   each library's CPE. Since April 15, 2026, NVD enriches first the CVEs
   in CISA's KEV catalog, in software the federal government uses, or in
@@ -1682,7 +1803,7 @@ again only rows.
   a CVE its CNA has scored; the scope rule's "any score" covers that.
   NVD's API also carries each record's `affected` list, the vendor and
   product in the CNA's own words (libsodium's CVE-2025-69277 has one),
-  which isn't a CPE and which phase 10 records but doesn't search.
+  which isn't a CPE and which phase 11 records but doesn't search.
   OSV gives git ranges for C libraries, but its record for CVE-2023-4863
   derives them from the same CPE range and patch link NVD has, so there
   it isn't an independent source; it may list CVEs NVD hasn't matched.
