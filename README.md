@@ -1291,16 +1291,18 @@ written for it.
     [Later](#later-tbd)).
   - bzip2, by its existing `library_string` row. `bzlib_private.h` is a
     private header, so the string can't be a header string, and the
-    report's "header string risk" mark on it is the Later item of that
-    name. It was seen in pyarrow's `libarrow.so.2600` (1.0.8), the only
-    match across all binaries outside `.libs/`.
+    report's "header string risk" mark on it is the Later item "Header
+    string risk from identity_file alone". It was seen in pyarrow's
+    `libarrow.so.2600` (1.0.8), the only match across all binaries
+    outside `.libs/`.
 
   Nothing else qualifies, each for a reason with its own Later entry:
   - OpenSSL: its only versioned string is `OPENSSL_VERSION_TEXT` from
     `include/openssl/opensslv.h.in`, a public header.
   - zstd: `zstd-sys`'s `+zstd.` build metadata appears in no binary.
   - aws-lc, BoringSSL and ring: aws-lc would give the crate's version,
-    not aws-lc's; BoringSSL has no releases; the OpenSSL-style object
+    not aws-lc's; BoringSSL embeds no version string; ring is a Rust
+    crate whose status as a C library is open; the OpenSSL-style object
     names show presence only.
   - geos: `capi/geos_c.h.in` is a public header.
 - **T.3** Static records. Fingerprint output gets records for T.2's
@@ -1706,8 +1708,9 @@ again only rows.
   crate source paths (`/rust/deps/…` and `.cargo/registry/…`), one per
   `.rs` file, so they crowd out the C libraries' strings. The paths
   carry crate versions, such as `aws-lc-sys`'s, that are kept for "C
-  libraries behind Rust `-sys` crates", so a noise rule would hide them; collapsing each path to its crate
-  directory would keep one template per crate.
+  libraries behind Rust `-sys` crates", so a noise rule would hide
+  them; collapsing each path to its crate directory would keep one
+  template per crate.
 - **OpenSSL in binaries outside `.libs/`.** No non-header string gives
   its version. cryptography's Rust `openssl` crate paths
   (`…/openssl-0.10.81/src/bio.rs`) are the bindings crate, so an
@@ -1717,8 +1720,11 @@ again only rows.
 - **C libraries behind Rust `-sys` crates.** In the top-100 run, no
   binary carries `zstd-sys`'s `+zstd.{version}` metadata. `aws-lc-sys`
   paths give the crate's version, which needs a crate-to-release table.
-  ring 0.17.14 (litellm) and BoringSSL have no release versions. The
-  OpenSSL-style object names (GOST, ANSI X9.62) in 8 wheels show
+  ring is a crate whose paths give its own version (0.17.14 in
+  litellm); its C and assembly derive from BoringSSL, and whether it
+  counts as a bundled C library, and under which CPE, is open.
+  BoringSSL embeds no version string, so no binary gives its version.
+  The OpenSSL-style object names (GOST, `ANSI X9.62`) in 8 wheels show
   presence only.
 - **zlib versions that aren't releases.** 1.3.0.1, 1.3.1.1 and 1.3.2.1
   are develop-branch versions, and playwright's node carries Chromium's
