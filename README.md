@@ -1275,23 +1275,44 @@ written for it.
   `lxml/etree` and `lxml/objectify`, and grpcio 1.84.0's zlib 1.3.1.1 in
   `grpc/_cython/cygrpc`, 2.1's known answers. Review reads the counts,
   the candidates and about the top 100 templates.
-- **T.2** *(maintainer input)* Which libraries to detect in binaries
-  outside `.libs/`, and with which patterns, chosen from T.1's report and
-  the wheels' SBOM claims (see [SBOMs in wheels](#sboms-in-wheels)):
-  cryptography 50.0.2 carries a second SBOM naming OpenSSL 4.0.3, and
-  cargo-cyclonedx lists `-sys` crates for C libraries, such as
-  `zstd-sys 2.0.16+zstd.1.5.7` in polars-runtime-32 2.0.0 and
-  `aws-lc-sys` in several wheels. These claims say where to look and
-  never set a version. Only a pattern whose string can't be a header
-  string qualifies: a string from a library's public header, such as
-  OpenSSL's, shows what a binary was compiled against, not that it
-  contains the library. ← current
+- **T.2** ✓ Which libraries to detect in binaries outside `.libs/`, and
+  with which patterns, chosen from T.1's `stale100` report and the
+  wheels' SBOM claims (see [SBOMs in wheels](#sboms-in-wheels)), which
+  say where to look and never set a version. Only a pattern whose string
+  can't be a header string qualifies: a string from a library's public
+  header shows what a binary was compiled against, not that it contains
+  the library. Two qualify:
+  - zlib, by the hand-written detector (roadmap 2.1). Its `deflate` and
+    `inflate` banners are literals in `deflate.c` and `inftrees.c`, not
+    header strings. It was seen in lxml 6.1.3 (`lxml/etree` and
+    `lxml/objectify`: 1.3.2), grpcio 1.84.0 (`cygrpc`: 1.3.1.1) and
+    playwright's `driver/node` (1.3.2.1 and 1.3.0.1). It gets no map row
+    yet (see "Checking patterns at every release tag" under
+    [Later](#later-tbd)).
+  - bzip2, by its existing `library_string` row. `bzlib_private.h` is a
+    private header, so the string can't be a header string, and the
+    report's "header string risk" mark on it is the Later item "Header
+    string risk from identity_file alone". It was seen in pyarrow's
+    `libarrow.so.2600` (1.0.8), the only match across all binaries
+    outside `.libs/`.
+
+  Nothing else qualifies, each for a reason with its own Later entry:
+  - OpenSSL: its only versioned string is `OPENSSL_VERSION_TEXT` from
+    `include/openssl/opensslv.h.in`, a public header.
+  - zstd: `zstd-sys`'s `+zstd.` build metadata appears in no binary.
+  - aws-lc, BoringSSL and ring: aws-lc would give the crate's version,
+    not aws-lc's; BoringSSL embeds no version string; ring is a Rust
+    crate whose status as a C library is open; the OpenSSL-style object
+    names show presence only.
+  - geos: `capi/geos_c.h.in` is a public header.
 - **T.3** Static records. Fingerprint output gets records for T.2's
   patterns in binaries outside `.libs/`, marked as static, and the
   staleness report gets rows for them. The derivative rule applies to
   them as it does to `.libs/` files. The record fields, the
   `schema_version` bump and how static rows are counted are settled
-  after T.2.
+  after T.2. The library map gets a **static** column: `yes` marks a
+  row whose pattern qualifies under T.2's rule (bzip2's row now), and
+  the zlib detector qualifies by code. ← current
 - **T.4** The top 500: the package list loader's 100-row cap (roadmap
   3.2) is lifted, `scripts/top_packages.py` stops at 500, and a full run
   scans them.
@@ -1686,9 +1707,34 @@ again only rows.
   about 90 of the static discovery report's top 100 templates are Rust
   crate source paths (`/rust/deps/…` and `.cargo/registry/…`), one per
   `.rs` file, so they crowd out the C libraries' strings. The paths
-  carry crate versions, such as `aws-lc-sys`'s, that T.2 reads, so a
-  noise rule would hide them; collapsing each path to its crate
-  directory would keep one template per crate.
+  carry crate versions, such as `aws-lc-sys`'s, that are kept for "C
+  libraries behind Rust `-sys` crates", so a noise rule would hide
+  them; collapsing each path to its crate directory would keep one
+  template per crate.
+- **OpenSSL in binaries outside `.libs/`.** No non-header string gives
+  its version. cryptography's Rust `openssl` crate paths
+  (`…/openssl-0.10.81/src/bio.rs`) are the bindings crate, so an
+  `{any}/openssl-{version}/{any}` build-path row would misread them as
+  OpenSSL 0.10.81. cryptography 50.0.2's SBOM naming OpenSSL 4.0.3 is a
+  claim only.
+- **C libraries behind Rust `-sys` crates.** In the top-100 run, no
+  binary carries `zstd-sys`'s `+zstd.{version}` metadata. `aws-lc-sys`
+  paths give the crate's version, which needs a crate-to-release table.
+  ring is a crate whose paths give its own version (0.17.14 in
+  litellm); its C and assembly derive from BoringSSL, and whether it
+  counts as a bundled C library, and under which CPE, is open.
+  BoringSSL embeds no version string, so no binary gives its version.
+  The OpenSSL-style object names (GOST, `ANSI X9.62`) in 8 wheels show
+  presence only.
+- **zlib versions that aren't releases.** 1.3.0.1, 1.3.1.1 and 1.3.2.1
+  are develop-branch versions, and playwright's node carries Chromium's
+  zlib. Neither maps to a release tag for CVE ranges.
+- **Statically linked libraries with no `.libs/` prefix.** Map rows are
+  keyed by prefix, so a library seen only statically, such as aws-lc,
+  has no row to hang a recognizer on.
+- **geos's header string outside `.libs/`.** `{version}-CAPI-{any}`
+  comes from `capi/geos_c.h.in`, so it can't qualify for static
+  detection.
 - **Phase files from an older numbering.** A lone `10-cves.jsonl` from
   before T.1 passes pre-flight as phase 10. Checking each file's name
   against its number's phase would catch it.
