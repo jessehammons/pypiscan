@@ -3,22 +3,24 @@
 See README "The library map". The map is a CSV file with the columns in
 ``COLUMNS``, one row per prefix, library and way of identifying it. A
 ``skip`` row has every column empty except ``prefix`` and ``library``. A
-mapped row needs a repo and tags, which ``tag_matcher`` compiles, and no
-identity in version 1. A row with a kind is a recognizer: its pattern
-compiles with ``matcher``, or ``parse_version_function`` for a
-``version_function_machine_code`` row, and every kind but ``build_path``
-cites an ``identity_file``. A row with no kind marks a library that is
-identified but has no recognizer yet. A ``bare_version`` row's prefix maps
-to no other library. ``cpe`` is required on a mapped row: the vendor and
-product of each of the library's CPE names in NVD, joined by ``:`` and
-separated by single spaces, or ``none`` (``cpe_names``). ``osv`` isn't used
-in version 1.
+mapped row needs a repo and tags, one or more patterns separated by single
+spaces, which ``tag_matcher`` compiles, and no identity in version 1. Its
+``not_release``, if set, is a regex; ``is_release`` applies it. A row with a
+kind is a recognizer: its pattern compiles with ``matcher``, or
+``parse_version_function`` for a ``version_function_machine_code`` row, and
+every kind but ``build_path`` cites an ``identity_file``. A row with no kind
+marks a library that is identified but has no recognizer yet. A
+``bare_version`` row's prefix maps to no other library. ``cpe`` is required
+on a mapped row: the vendor and product of each of the library's CPE names
+in NVD, joined by ``:`` and separated by single spaces, or ``none``
+(``cpe_names``). ``osv`` isn't used in version 1.
 ``load_ambiguous_versions`` reads the list of ambiguous versions against the
 map's rows.
 """
 
 import csv
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -28,6 +30,7 @@ COLUMNS = [
     "library",
     "repo",
     "tags",
+    "not_release",
     "kind",
     "pattern",
     "identity_file",
@@ -39,7 +42,7 @@ VERSION_FUNCTION = "version_function_machine_code"
 KINDS = ("library_string", "build_path", VERSION_FUNCTION, "bare_version")
 SKIP = "skip"
 # Columns every row for one library agrees on.
-SHARED = ("repo", "tags", "cpe", "osv")
+SHARED = ("repo", "tags", "not_release", "cpe", "osv")
 
 PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
 # A digit followed by letters, digits, ".", "+", "~" or "-".
@@ -48,6 +51,8 @@ VERSION = r"\d[0-9A-Za-z.+~-]*"
 BARE_VERSION = r"\d+(?:\.\d+){2,}"
 # In tags, a version can also be spelled with "_" (REL_18_6).
 TAG_VERSION = r"\d[0-9A-Za-z._+~-]*"
+# The only versions that can be releases.
+DOTTED = re.compile(r"\d+(?:\.\d+)*")
 C_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 NUMBER = re.compile(r"\d+")
 # A CPE's vendor and product, joined by ":".
@@ -72,6 +77,8 @@ class MapRow:
     identity: str
     cpe: str
     osv: str
+    # Last, with a default, so rows built in code needn't name it.
+    not_release: str = ""
 
 
 def _split(column: str, text: str, allowed: set[str]) -> list[str]:
@@ -175,15 +182,49 @@ def parse_version_function(pattern: str) -> VersionFunction:
     )
 
 
-def tag_matcher(tags: str) -> re.Pattern[str]:
-    """Compile a tags value for ``fullmatch``, with the version as group 1."""
-    parts = _split("tags", tags, {"version"})
-    return re.compile(f"{re.escape(parts[0])}({TAG_VERSION}){re.escape(parts[2])}")
+def _tag_patterns(tags: str) -> list[re.Pattern[str]]:
+    """Compile each of a tags value's patterns for ``fullmatch``, with the
+    version as group 1. Raises ``ValueError`` for a pattern a tags value
+    can't have."""
+    compiled: list[re.Pattern[str]] = []
+    for pattern in tags.split(" "):
+        if not pattern:
+            raise ValueError(
+                f"tags {tags!r} has an empty pattern; patterns are separated "
+                "by single spaces"
+            )
+        parts = _split("tags", pattern, {"version"})
+        compiled.append(
+            re.compile(f"{re.escape(parts[0])}({TAG_VERSION}){re.escape(parts[2])}")
+        )
+    return compiled
+
+
+def tag_matcher(tags: str) -> Callable[[str], str | None]:
+    """A function that gives a tag's version from the first of ``tags``'s
+    patterns that matches it, or ``None`` when none does."""
+    patterns = _tag_patterns(tags)
+
+    def version(tag: str) -> str | None:
+        for pattern in patterns:
+            if match := pattern.fullmatch(tag):
+                return tag_version(match[1])
+        return None
+
+    return version
 
 
 def tag_version(text: str) -> str:
     """A version as a tag spells it, with "_" or "-" between digits as "."."""
     return re.sub(r"(?<=\d)[_-](?=\d)", ".", text)
+
+
+def is_release(version: str, not_release: str) -> bool:
+    """Whether a listed version is a release: digits separated by dots, and
+    not a full match of the library's ``not_release`` regex, if it has one."""
+    return bool(DOTTED.fullmatch(version)) and not (
+        not_release and re.fullmatch(not_release, version)
+    )
 
 
 def cpe_names(cpe: str) -> list[str]:
@@ -227,9 +268,13 @@ def _row_problem(row: dict[str, str]) -> str | None:
         return problem
     try:
         # A typo here would make phase 06 match no tags.
-        _split("tags", row["tags"], {"version"})
+        _tag_patterns(row["tags"])
     except ValueError as exc:
         return str(exc)
+    try:
+        re.compile(row["not_release"])
+    except re.error as exc:
+        return f"not_release {row['not_release']!r} isn't a regex: {exc}"
     kind = row["kind"]
     if not kind:
         filled = [n for n in ("pattern", "identity_file") if row[n]]

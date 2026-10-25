@@ -12,6 +12,7 @@ tag exists and contains its commits is the range verifier's job (roadmap
 import math
 import re
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from pathlib import Path
@@ -208,7 +209,9 @@ def _severity(table: Table, where: str) -> Severity:
     return Severity(source, cvss, float(score), label)
 
 
-def _fix(table: Table, where: str, tags: re.Pattern[str], spelled: str) -> Fix:
+def _fix(
+    table: Table, where: str, tags: Callable[[str], str | None], spelled: str
+) -> Fix:
     _keys(table, where, FIX_KEYS, ())
     commits = _strs(table["commits"], f"{where}.commits")
     if not commits:
@@ -220,7 +223,7 @@ def _fix(table: Table, where: str, tags: re.Pattern[str], spelled: str) -> Fix:
                 f"{commit!r} isn't a commit: 40 lowercase hex digits",
             )
     tag = _str(table["tag"], f"{where}.tag")
-    if not tags.fullmatch(tag):
+    if tags(tag) is None:
         raise _Problem(
             f"{where}.tag", f"{tag!r} doesn't match the library's tags {spelled}"
         )

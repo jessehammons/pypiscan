@@ -4,7 +4,7 @@ rows."""
 from datetime import date
 from typing import cast
 
-from pypiscan.library_map import MapRow
+from pypiscan.library_map import MapRow, is_release
 from pypiscan.package_list import Package
 from pypiscan.scan import Line
 from pypiscan.staleness_report import INTRO, report, staleness, upload_day
@@ -43,11 +43,14 @@ AMBIGUOUS = {"lcms": {"2.19.0": ["2.19.1"]}}
 
 def ok_06(library: str, *tags: tuple[str, str]) -> Line:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "library": library,
         "status": "ok",
         "reason": None,
-        "tags": [{"tag": f"v{v}", "version": v, "date": d} for v, d in tags],
+        "tags": [
+            {"tag": f"v{v}", "version": v, "date": d, "release": is_release(v, "")}
+            for v, d in tags
+        ],
     }
 
 
@@ -65,9 +68,9 @@ PHASE_06: dict[str, Line] = {
         ok_06("lcms", ("2.19.0", "2025-01-01"), ("2.19.1", "2025-02-01"),
               ("2.20", "2025-03-01")),
         ok_06("hint", ("1.0.0", "2025-01-01")),
-        {"schema_version": 2, "library": "remote", "status": "skipped",
+        {"schema_version": 3, "library": "remote", "status": "skipped",
          "reason": "not_github"},
-        {"schema_version": 2, "library": "broken", "status": "error",
+        {"schema_version": 3, "library": "broken", "status": "error",
          "reason": "git fetch failed: gone"},
         ok_06("blas", ("0.3.34", "2025-01-01"), ("0.3.35", "2025-02-01")),
         ok_06("nover", ("1.0", "2025-01-01")),
@@ -189,8 +192,8 @@ def test_report_starts_with_counts() -> None:
 
 
 def test_old_phase_06_lines_are_never_compared() -> None:
-    """An episode from before tag dates says to rerun from phase 06, and
-    treats none of the libraries it covers as current."""
+    """An episode from before tag dates or release flags says to rerun from
+    phase 06, and treats none of the libraries it covers as current."""
     # A schema 1 line, as phase 06 wrote it before tag dates: no "date".
     cur: Line = {
         "schema_version": 1,
@@ -199,12 +202,21 @@ def test_old_phase_06_lines_are_never_compared() -> None:
         "reason": None,
         "tags": [{"tag": "v1.2.0", "version": "1.2.0"}],
     }
-    old = {**PHASE_06, "cur": cur}
+    # A schema 2 line, as phase 06 wrote it before release flags.
+    old_2 = {**cast(Line, PHASE_06["old"]), "schema_version": 2}
+    tags_2 = cast(list[Line], old_2["tags"])
+    old_2["tags"] = [{k: v for k, v in t.items() if k != "release"} for t in tags_2]
+    old = {**PHASE_06, "cur": cur, "old": old_2}
     out = text(old)
-    rerun = "- Phase 06's lines predate tag dates, so their libraries aren't "
+    rerun = (
+        "- Phase 06's lines predate tag dates or release flags, so their "
+        "libraries aren't "
+    )
     assert f"## Counts\n\n{rerun}compared: rerun from phase 06.\n" in out
-    assert "- Compared: current 1 (bare_version 1); behind 2" in out
+    assert "- Compared: current 1 (bare_version 1); behind 1" in out
     assert table_row("libcur", "cur", "1.2.0", "library_string", "",
+                     "not compared: rerun from phase 06", "—", "—") in out  # fmt: skip
+    assert table_row("libold", "old", "2.0.9", "build_path", "",
                      "not compared: rerun from phase 06", "—", "—") in out  # fmt: skip
     assert "predate" not in text()
 
@@ -229,7 +241,7 @@ def test_upload_day_is_in_utc() -> None:
 
 def test_a_tag_spelled_twice_keeps_its_earliest_date() -> None:
     upstream = ok_06("x", ("1.1", "2025-03-01"), ("1.0", "2025-01-01"))
-    again = {"tag": "x-1.1", "version": "1.1", "date": "2025-02-01"}
+    again = {"tag": "x-1.1", "version": "1.1", "date": "2025-02-01", "release": True}
     upstream["tags"] = [*cast(list[Line], upstream["tags"]), again]
     assert staleness("1.0", [], upstream, date(2025, 6, 1)) == (
         "",
@@ -241,7 +253,7 @@ def test_a_tag_spelled_twice_keeps_its_earliest_date() -> None:
 
 def test_a_later_spelling_of_a_tag_keeps_the_earlier_date() -> None:
     upstream = ok_06("x", ("1.1", "2025-02-01"), ("1.0", "2025-01-01"))
-    again = {"tag": "x-1.1", "version": "1.1", "date": "2025-03-01"}
+    again = {"tag": "x-1.1", "version": "1.1", "date": "2025-03-01", "release": True}
     upstream["tags"] = [*cast(list[Line], upstream["tags"]), again]
     result = staleness("1.0", [], upstream, date(2025, 6, 1))
     assert result == ("", "1.1 (2025-02-01)", "1", "120")
@@ -265,3 +277,23 @@ def test_a_package_without_libs_and_a_library_missing_from_phase_06() -> None:
     out = report(packages, part_1, {}, phase_08, ROWS, {})
     assert "not compared: not in phase 06" in out
     assert "## bare 1.0\n\n`bare.whl`, uploaded 2025-06-14\n\nNo .libs/ files." in out
+
+
+def test_only_tags_marked_as_releases_count() -> None:
+    """libjpeg-turbo's 3.1.90 beta is digits and dots, but phase 06 marks it
+    no release, so Pillow 12.3.0's 3.1.4.1 is 1 day behind 3.2.0, not 96
+    behind the beta (roadmap S.3)."""
+    upstream = ok_06(
+        "libjpeg-turbo",
+        ("3.1.4.1", "2026-03-01"),
+        ("3.1.90", "2026-03-27"),
+        ("3.2.0", "2026-06-30"),
+    )
+    tags = cast(list[Line], upstream["tags"])
+    tags[1]["release"] = False
+    result = staleness("3.1.4.1", [], upstream, date(2026, 7, 1))
+    assert result == ("", "3.2.0 (2026-06-30)", "1", "1")
+    # A version marked no release isn't a bundled release either.
+    assert staleness("3.1.90", [], upstream, date(2026, 7, 1)) == (
+        "no release tag for the version"
+    )

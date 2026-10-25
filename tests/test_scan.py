@@ -660,7 +660,7 @@ def test_bad_library_map_fails_preflight(
 ) -> None:
     dirs.map.write_text(
         ",".join(COLUMNS)
-        + "\nlibz,zlib,r,v{version},header_string,{version},f,,none,\n"
+        + "\nlibz,zlib,r,v{version},,header_string,{version},f,,none,\n"
     )
     assert run(dirs, "--count", "1") == 2
     assert f"{dirs.map}:2: unknown kind 'header_string'" in capsys.readouterr().err
@@ -836,7 +836,7 @@ def test_scan_stops_for_the_manual_step(
     assert missing["status"] == "skipped" and missing["reason"] == "01-resolve"
     todo = dirs.episode / "library-map-todo.csv"
     header = ",".join(COLUMNS)
-    assert todo.read_text() == f"{header}\nlibpng16,,,,,,,,,\nlibgfortran,,,,,,,,,\n"
+    assert todo.read_text() == f"{header}\nlibpng16,,,,,,,,,,\nlibgfortran,,,,,,,,,,\n"
     text = (dirs.episode / "library-report.md").read_text()
     assert "1. ` libpng16 `: 2 wheels, 2 files\n2. ` libgfortran `: 1 wheel" in text
     assert "2 wheels, 2 files: demo, puredemo" in text
@@ -853,18 +853,18 @@ def test_scan_stops_for_the_manual_step(
 
     # Mapping one prefix leaves the other, and phase 06 doesn't run.
     repo = make_repo(dirs.episode.parent / "libpng", {"v1.6.58": {}})
-    png = f"libpng16,libpng,{repo},v{{version}},library_string,"
+    png = f"libpng16,libpng,{repo},v{{version}},,library_string,"
     png += "libpng version {version},p.c,,none,"
     dirs.map.write_text(f"{header}\n{png}\n")
     assert run(dirs, "--count", "3") == 3
     assert "\n  libgfortran\n" in capsys.readouterr().err
-    assert todo.read_text() == f"{header}\nlibgfortran,,,,,,,,,\n"
+    assert todo.read_text() == f"{header}\nlibgfortran,,,,,,,,,,\n"
     assert not list(dirs.episode.glob("06-*"))
     # Stopping at the manual step writes no fingerprint report.
     assert not (dirs.episode / "fingerprint-report.md").exists()
 
     # Once every prefix is listed, the todo is empty and phase 06 runs.
-    dirs.map.write_text(f"{header}\n{png}\nlibgfortran,skip,,,,,,,,\n")
+    dirs.map.write_text(f"{header}\n{png}\nlibgfortran,skip,,,,,,,,,\n")
     assert run(dirs, "--count", "3") == 0
     err = capsys.readouterr().err
     assert "library-map-todo" not in err
@@ -877,8 +877,8 @@ def test_scan_stops_for_the_manual_step(
     assert todo.read_text() == f"{header}\n"
     [libpng] = dirs.lines("06-upstream")
     assert libpng["library"] == "libpng"
-    assert libpng["schema_version"] == 2
-    tag = {"tag": "v1.6.58", "version": "1.6.58", "date": "1970-01-12"}
+    assert libpng["schema_version"] == 3
+    tag = {"tag": "v1.6.58", "version": "1.6.58", "date": "1970-01-12", "release": True}
     assert libpng["tags"] == [tag]
     demo, pure, missing = dirs.lines("08-fingerprint")
     path = "demo.libs/libpng16-1a2b3c4d.so.16.58.0"
@@ -998,9 +998,9 @@ def test_report_shows_why_a_package_stopped_at_phase_02(
 
     monkeypatch.setattr(scan_module, "phases", with_too_large)
     repo = make_repo(dirs.episode.parent / "libpng", {"v1.6.58": {}})
-    png = f"libpng16,libpng,{repo},v{{version}},library_string,"
+    png = f"libpng16,libpng,{repo},v{{version}},,library_string,"
     png += "libpng version {version},p.c,,none,"
-    dirs.map.write_text(f"{','.join(COLUMNS)}\n{png}\nlibgfortran,skip,,,,,,,,\n")
+    dirs.map.write_text(f"{','.join(COLUMNS)}\n{png}\nlibgfortran,skip,,,,,,,,,\n")
     assert run(dirs, "--count", "3") == 0
     [_, pure, _] = dirs.lines("08-fingerprint")
     assert (pure["status"], pure["reason"]) == ("skipped", "02-fetch")
@@ -1021,10 +1021,10 @@ def test_upstream_libraries_in_order_of_first_appearance(tmp_path: Path) -> None
     path = tmp_path / "m.csv"
     path.write_text(
         ",".join(COLUMNS)
-        + "\nlibz,zlib,r,v{version},,,,,none,"
-        + "\nlibgfortran,skip,,,,,,,,"
-        + "\nlibpng16,libpng,p,v{version},,,,,none,"
-        + "\nlibz2,zlib,r,v{version},,,,,none,\n"
+        + "\nlibz,zlib,r,v{version},,,,,,none,"
+        + "\nlibgfortran,skip,,,,,,,,,"
+        + "\nlibpng16,libpng,p,v{version},,,,,,none,"
+        + "\nlibz2,zlib,r,v{version},,,,,,none,\n"
     )
     assert upstream_libraries(load_library_map(path)) == [
         Library("zlib", "r", "v{version}", "none"),
@@ -1042,8 +1042,18 @@ def test_phase_06_clones_then_fetches(tmp_path: Path) -> None:
         {
             "repo": str(repo),
             "tags": [
-                {"tag": "v1.3.1", "version": "1.3.1", "date": "1970-01-12"},
-                {"tag": "v1.3.2-pre", "version": "1.3.2-pre", "date": "1970-01-12"},
+                {
+                    "tag": "v1.3.1",
+                    "version": "1.3.1",
+                    "date": "1970-01-12",
+                    "release": True,
+                },
+                {
+                    "tag": "v1.3.2-pre",
+                    "version": "1.3.2-pre",
+                    "date": "1970-01-12",
+                    "release": False,
+                },
             ],
         },
     )
@@ -1085,8 +1095,41 @@ def test_phase_06_lists_versions_spelled_with_underscores(tmp_path: Path) -> Non
     repo = make_repo(tmp_path / "pg", {"REL_18_6": {}, "REL_18_BETA1": {}})
     result = upstream(tmp_path, Library("postgresql", str(repo), "REL_{version}"))
     assert result.data["tags"] == [
-        {"tag": "REL_18_6", "version": "18.6", "date": "1970-01-12"},
-        {"tag": "REL_18_BETA1", "version": "18_BETA1", "date": "1970-01-12"},
+        {"tag": "REL_18_6", "version": "18.6", "date": "1970-01-12", "release": True},
+        {
+            "tag": "REL_18_BETA1",
+            "version": "18_BETA1",
+            "date": "1970-01-12",
+            "release": False,
+        },
+    ]
+
+
+def test_phase_06_takes_each_version_from_the_first_pattern(tmp_path: Path) -> None:
+    """lcms2's tags: lcms2-2.7, lcms2.19 and a bare 2.11 (roadmap S.3)."""
+    names = ["lcms2-2.7", "lcms2.19", "lcms2.19rc1", "2.11", "lcm2.16rc1"]
+    repo = make_repo(tmp_path / "lcms2", {name: {} for name in names})
+    tags = "lcms2-{version} lcms{version} {version}"
+    result = upstream(tmp_path, Library("lcms2", str(repo), tags))
+    listed = cast(list[dict[str, object]], result.data["tags"])
+    assert [(t["tag"], t["version"], t["release"]) for t in listed] == [
+        ("2.11", "2.11", True),
+        ("lcms2-2.7", "2.7", True),
+        ("lcms2.19", "2.19", True),
+        ("lcms2.19rc1", "2.19rc1", False),
+    ]
+
+
+def test_phase_06_marks_not_release_versions(tmp_path: Path) -> None:
+    names = ["3.1.4.1", "3.1.90", "3.2.0", "2.0.7-esr"]
+    repo = make_repo(tmp_path / "ljt", {name: {} for name in names})
+    library = Library("libjpeg-turbo", str(repo), "{version}", "", r"\d+\.\d+\.9\d")
+    listed = cast(list[dict[str, object]], upstream(tmp_path, library).data["tags"])
+    assert [(t["version"], t["release"]) for t in listed] == [
+        ("2.0.7-esr", False),
+        ("3.1.4.1", True),
+        ("3.1.90", False),
+        ("3.2.0", True),
     ]
 
 
@@ -1192,7 +1235,7 @@ def test_changed_map_after_phase_06_fails_preflight(
     dirs: Dirs, capsys: pytest.CaptureFixture[str]
 ) -> None:
     repo = make_repo(dirs.episode.parent / "zlib", {"v1.3.1": {}})
-    row = f"libz,zlib,{repo},v{{version}},,,,,none,"
+    row = f"libz,zlib,{repo},v{{version}},,,,,,none,"
     dirs.map.write_text(f"{','.join(COLUMNS)}\n{row}\n")
     assert run(dirs, "--count", "3") == 0
     recorded = json.loads((dirs.episode / "episode.json").read_text())
@@ -1204,7 +1247,7 @@ def test_changed_map_after_phase_06_fails_preflight(
     assert "06-upstream: already finished, skipped" in err
     assert "07-recognizers: already finished, skipped" in err
 
-    dirs.map.write_text(f"{','.join(COLUMNS)}\n{row}\nlibfoo,skip,,,,,,,,\n")
+    dirs.map.write_text(f"{','.join(COLUMNS)}\n{row}\nlibfoo,skip,,,,,,,,,\n")
     assert run(dirs, "--count", "3") == 2
     assert capsys.readouterr().err == (
         "pypiscan scan: error: the library map has changed since phase 06 ran. "
@@ -1228,7 +1271,7 @@ def test_version_1_episode_passes_preflight(
     sha256; pre-flight accepts it, and phase 06 upgrades it to version 2."""
     repo = make_repo(dirs.episode.parent / "zlib", {"v1.3.1": {}})
     dirs.map.write_text(
-        f"{','.join(COLUMNS)}\nlibz,zlib,{repo},v{{version}},,,,,none,\n"
+        f"{','.join(COLUMNS)}\nlibz,zlib,{repo},v{{version}},,,,,,none,\n"
     )
     dirs.episode.mkdir()
     v1 = {"schema_version": 1, **episode_inputs(dirs.list, 3), "code_version": "0"}
@@ -1306,13 +1349,14 @@ def test_per_library_phases_run_every_library(tmp_path: Path) -> None:
 
 
 RECOGNIZER_MAP = [
-    "libpng16,libpng,P,v{version},library_string,libpng version {version},png.c,,none,",
-    "libpng16d,libpng,P,v{version},bare_version,{version},png.h,,none,",
-    "libcrypto,openssl,O,openssl-{version},library_string,"
+    "libpng16,libpng,P,v{version},,library_string,"
+    "libpng version {version},png.c,,none,",
+    "libpng16d,libpng,P,v{version},,bare_version,{version},png.h,,none,",
+    "libcrypto,openssl,O,openssl-{version},,library_string,"
     "OpenSSL {version} {any},include/openssl/opensslv.h.in,,none,",
-    "libssl,openssl,O,openssl-{version},,,,,none,",
-    "libwebp,libwebp,W,v{version},,,,,none,",
-    "libopenjp2,openjpeg,J,v{version},build_path,{any}/openjpeg-{version}/{any},,,none,",
+    "libssl,openssl,O,openssl-{version},,,,,,none,",
+    "libwebp,libwebp,W,v{version},,,,,,none,",
+    "libopenjp2,openjpeg,J,v{version},,build_path,{any}/openjpeg-{version}/{any},,,none,",
 ]
 
 
@@ -1388,7 +1432,7 @@ def test_phase_07_runs_whatever_phase_06_said(
     dirs: Dirs, capsys: pytest.CaptureFixture[str]
 ) -> None:
     repo = str(dirs.episode.parent / "missing")
-    row = f"libtiff,libtiff,{repo},v{{version}},library_string,"
+    row = f"libtiff,libtiff,{repo},v{{version}},,library_string,"
     row += '"LIBTIFF, Version {version}",libtiff/tiffvers.h.in,,none,'
     dirs.map.write_text(f"{','.join(COLUMNS)}\n{row}\n")
     assert run(dirs, "--count", "3") == 0
@@ -1438,8 +1482,8 @@ def test_stop_during_part_2_leaves_no_phase_08(
 
     monkeypatch.setattr(scan_module, "library_phases", part_2)
     header = ",".join(COLUMNS)
-    png = "libpng16,libpng,r,v{version},,,,,none,"
-    dirs.map.write_text(f"{header}\n{png}\nlibgfortran,skip,,,,,,,,\n")
+    png = "libpng16,libpng,r,v{version},,,,,,none,"
+    dirs.map.write_text(f"{header}\n{png}\nlibgfortran,skip,,,,,,,,,\n")
     assert run(dirs, "--count", "3") == EXIT_INTERRUPTED
     assert "interrupted after the last phase finished" in capsys.readouterr().err
     assert not list(dirs.episode.glob("08-*"))
@@ -1478,9 +1522,9 @@ def test_editing_the_ambiguous_list_rewrites_the_report(
 ) -> None:
     monkeypatch.setattr(scan_module, "phases", stub_phases)
     repo = make_repo(dirs.episode.parent / "libpng", {"v1.6.58": {}})
-    png = f"libpng16,libpng,{repo},v{{version}},library_string,"
+    png = f"libpng16,libpng,{repo},v{{version}},,library_string,"
     png += "libpng version {version},p.c,,none,"
-    dirs.map.write_text(f"{','.join(COLUMNS)}\n{png}\nlibgfortran,skip,,,,,,,,\n")
+    dirs.map.write_text(f"{','.join(COLUMNS)}\n{png}\nlibgfortran,skip,,,,,,,,,\n")
     assert run(dirs, "--count", "3") == 0
     report = dirs.episode / "fingerprint-report.md"
     row = "| libpng16-1a2b3c4d.so.16.58.0 | libpng | 1.6.58 | library_string |"
@@ -1539,9 +1583,9 @@ def test_sbom_report_is_rewritten_once_phase_09_is_finished(
 ) -> None:
     monkeypatch.setattr(scan_module, "phases", with_auditwheel_sbom)
     repo = make_repo(dirs.episode.parent / "libpng", {"v1.6.58": {}})
-    png = f"libpng16,libpng,{repo},v{{version}},library_string,"
+    png = f"libpng16,libpng,{repo},v{{version}},,library_string,"
     png += "libpng version {version},p.c,,none,"
-    dirs.map.write_text(f"{','.join(COLUMNS)}\n{png}\nlibgfortran,skip,,,,,,,,\n")
+    dirs.map.write_text(f"{','.join(COLUMNS)}\n{png}\nlibgfortran,skip,,,,,,,,,\n")
     sboms_phase = scan_module.sboms_phase
 
     def interrupt(package: Package, earlier: Mapping[str, Line]) -> Result:
@@ -1626,7 +1670,7 @@ def test_cve_table_is_checked_against_the_map(
     assert "library: 'libwebp' isn't a library the map tracks" in (
         capsys.readouterr().err
     )
-    webp = "libwebp,libwebp,https://chromium.googlesource.com/webm/libwebp,v{version}"
+    webp = "libwebp,libwebp,https://chromium.googlesource.com/webm/libwebp,v{version},"
     dirs.map.write_text(f"{','.join(COLUMNS)}\n{webp},,,,,none,\n")
     assert run(dirs, "--count", "1") == 2
     assert "library: 'libwebp' has cpe none in the library map" in (
@@ -1644,8 +1688,8 @@ def test_cve_table_is_checked_against_the_map(
 def test_phase_10_runs_last_once_per_library(
     dirs: Dirs, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    webp = "libwebp,libwebp,https://chromium.googlesource.com/webm/libwebp,v{version}"
-    geos = "libgeos_c,geos,https://github.com/libgeos/geos,{version}"
+    webp = "libwebp,libwebp,https://chromium.googlesource.com/webm/libwebp,v{version},"
+    geos = "libgeos_c,geos,https://github.com/libgeos/geos,{version},"
     dirs.map.write_text(
         f"{','.join(COLUMNS)}\n{webp},,,,,webmproject:libwebp,\n{geos},,,,,none,\n"
     )
@@ -1673,7 +1717,7 @@ def test_phase_10_runs_last_once_per_library(
 
 def test_phase_10_waits_between_requests_across_libraries(dirs: Dirs) -> None:
     rows = [
-        f"lib{name},{name},https://example.org/{name},v{{version}},,,,,{name}:{name},"
+        f"lib{name},{name},https://example.org/{name},v{{version}},,,,,,{name}:{name},"
         for name in ("a", "b")
     ]
     dirs.map.write_text("\n".join([",".join(COLUMNS), *rows]) + "\n")
@@ -1711,8 +1755,8 @@ def test_stop_during_part_3_leaves_no_phase_10(
 
     monkeypatch.setattr(scan_module, "phases", stub_phases)
     monkeypatch.setattr(scan_module, "sboms_phase", interrupting_sboms)
-    png = "libpng16,libpng,r,v{version},,,,,png:png,"
-    dirs.map.write_text(f"{','.join(COLUMNS)}\n{png}\nlibgfortran,skip,,,,,,,,\n")
+    png = "libpng16,libpng,r,v{version},,,,,,png:png,"
+    dirs.map.write_text(f"{','.join(COLUMNS)}\n{png}\nlibgfortran,skip,,,,,,,,,\n")
     assert run(dirs, "--count", "3") == EXIT_INTERRUPTED
     assert (dirs.episode / "09-sboms.jsonl.partial").is_file()
     assert not list(dirs.episode.glob("10-*"))
