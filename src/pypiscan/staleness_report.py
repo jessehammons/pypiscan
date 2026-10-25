@@ -235,7 +235,7 @@ def _static_rows(
     """A package's static_lib rows from its phase 10 line, each named by its
     member, or why there are none."""
     if static["status"] != "ok":
-        counts["packages not scanned"] += 1
+        counts["phase 10 not ok"] += 1
         return [], stopped(package.name, static, part_1, STATIC)
     upstream, _, _, ambiguous, lines = context
     found: list[str] = []
@@ -272,9 +272,6 @@ def _section(
     upstream, by_prefix, recognized, ambiguous, lines = context
     out = [f"## {package.name} {package.version}", ""]
     if fingerprints["status"] != "ok":
-        counts["shared_lib"]["packages not scanned"] += 1
-        if static is not None:
-            counts["static_lib"]["packages not scanned"] += 1
         out.append(stopped(package.name, fingerprints, part_1, FINGERPRINT))
         return out
     uploaded = upload_day(part_1["01-resolve"][package.name])
@@ -346,7 +343,11 @@ def _summary(c: Counter[str], linkage: Linkage) -> list[str]:
     ]
     if linkage == "shared_lib":
         summary.append(f"- Files whose prefix is marked skip: {c['skipped']}.")
-    return [*summary, f"- Packages not scanned: {c['packages not scanned']}.", ""]
+    else:
+        summary.append(
+            f"- Packages whose phase 10 line isn't ok: {c['phase 10 not ok']}."
+        )
+    return [*summary, ""]
 
 
 def _static_problem(static: Mapping[str, Line] | None) -> str | None:
@@ -405,7 +406,9 @@ def report(
         )
     if absent:
         summary.append(f"- {absent}")
-    summary += [""] if summary else []
+    # Per package, so once above the per-linkage blocks.
+    not_scanned = sum(fingerprints[p.name]["status"] != "ok" for p in packages)
+    summary += [f"- Packages not scanned: {not_scanned}.", ""]
     # One block per linkage present, so the .libs/ counts stay comparable
     # with reports from before static rows.
     present: list[Linkage] = ["shared_lib"] if absent else ["shared_lib", "static_lib"]

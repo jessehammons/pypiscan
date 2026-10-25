@@ -200,7 +200,8 @@ def test_report_covers_every_case() -> None:
 def test_report_starts_with_counts() -> None:
     counts = (
         "## Counts\n\n"
-        "- Static rows are absent: phase 10 isn't finished.\n\n"
+        "- Static rows are absent: phase 10 isn't finished.\n"
+        "- Packages not scanned: 1.\n\n"
         "### shared_lib\n\n"
         "- Compared: current 2 (bare_version 1, library_string 1); behind 2 "
         "(build_path 1, version_function_machine_code 1). By basis.\n"
@@ -211,7 +212,6 @@ def test_report_starts_with_counts() -> None:
         "- Not compared: 5 (no recognizer 1, no release tag for the version 1, "
         "not detected 1, not_github 1, phase 06 error 1). By reason.\n"
         "- Files whose prefix is marked skip: 1.\n"
-        "- Packages not scanned: 1.\n"
     )
     assert text().startswith(f"{INTRO}\n{counts}")
 
@@ -528,7 +528,7 @@ def test_counts_are_kept_apart_by_linkage() -> None:
         "- Compared, by line status: 1 (single line 1).\n"
         "- Not compared: 2 (matches disagree 1, no release tag for the "
         "version 1). By reason.\n"
-        "- Packages not scanned: 1."
+        "- Packages whose phase 10 line isn't ok: 0."
     )
     assert out.index("### shared_lib") < out.index("### static_lib")
     assert "Static rows are absent" not in out
@@ -566,6 +566,17 @@ def test_a_package_with_static_rows_only_or_no_phase_10_line() -> None:
     error = {"schema_version": 2, "status": "error", "reason": "b/z.so is missing"}
     out = report(bare, part_1, phase_06, phase_08, {"bare": error}, ROWS, {}, {})
     assert "No .libs/ files.\n\nNo static rows: error at 10-static: b/z.so is " in out
+    assert "- Packages not scanned: 0.\n" in out
+    assert "- Packages whose phase 10 line isn't ok: 1.\n" in out
+
+
+def test_packages_not_scanned_is_counted_once_above_the_blocks() -> None:
+    """A package stopped before phase 08 is counted once, not once per
+    linkage."""
+    out = static_text()
+    assert out.count("Packages not scanned") == 1
+    summary = out.split("### shared_lib")[0]
+    assert summary.endswith("- Packages not scanned: 1.\n\n")
 
 
 @pytest.mark.parametrize("phase", ["08", "10"])

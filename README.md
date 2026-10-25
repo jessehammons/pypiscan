@@ -946,10 +946,12 @@ reason, as in the fingerprint report.
 The report starts with counts: libraries compared, current and behind,
 by basis, then current and behind on their line, by basis, and by line
 status, and libraries not compared, by reason, so a reader sees how
-much of the substrate the numbers cover. The counts are given once per
+much of the substrate the numbers cover. Packages not scanned are a
+count of packages, given once. The other counts are given once per
 linkage present, `shared_lib` first and then `static_lib`, with no
 combined total, so the `.libs/` numbers stay comparable with reports
-from before static rows.
+from before static rows. The `static_lib` counts end with the packages
+whose phase 10 line isn't `ok`.
 
 Rules:
 
@@ -1397,8 +1399,8 @@ written for it.
   `lxml/objectify` is compared, grpcio 1.84.0's zlib 1.3.1.1 is not
   compared for lack of a release tag, playwright's `driver/node` gives
   one zlib record with a conflict, pyarrow's bzip2 1.0.8 in
-  `libarrow.so.2600` is compared, and the `shared_lib` counts match the
-  earlier report's.
+  `libarrow.so.2600` and pymupdf's zlib 1.3.2 in `libmupdf.so.28.2` are
+  compared, and the `shared_lib` counts match the earlier report's.
 - **T.4** The top 500: the package list loader's 100-row cap (roadmap
   3.2) is lifted, `scripts/top_packages.py` stops at 500, and a full run
   scans them. ← current
@@ -1814,7 +1816,11 @@ again only rows.
   presence only.
 - **zlib versions that aren't releases.** 1.3.0.1, 1.3.1.1 and 1.3.2.1
   are develop-branch versions, and playwright's node carries Chromium's
-  zlib. Neither maps to a release tag for CVE ranges.
+  zlib. Neither maps to a release tag for CVE ranges. zlib's map row
+  marks four-part versions `not_release` (`\d+\.\d+\.\d+\.\d+`): its
+  repository has a `v1.3.1.2` tag, whose `zlib.h` says `1.3.1.2-audit`,
+  and which isn't a release on GitHub, so it never makes a wheel look
+  behind.
 - **Statically linked libraries with no `.libs/` prefix.** Map rows are
   keyed by prefix. A `detector` row (roadmap T.3) covers a library a
   hand-written detector finds, as zlib's does, but a library that would
