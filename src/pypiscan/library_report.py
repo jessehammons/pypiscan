@@ -86,14 +86,14 @@ def _prefixes(
     return sorted(found.values(), key=lambda p: (-len(p.packages), -p.files, p.name))
 
 
-def _code(text: str) -> str:
+def code(text: str) -> str:
     """``text`` as a Markdown code span, whatever backticks it contains."""
     longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
     fence = "`" * (longest + 1)
     return f"{fence} {text} {fence}"
 
 
-def _count(n: int, noun: str, plural: str = "") -> str:
+def count(n: int, noun: str, plural: str = "") -> str:
     return f"{n} {noun}" if n == 1 else f"{n} {plural or noun + 's'}"
 
 
@@ -104,9 +104,9 @@ def report(packages: Sequence[str], lines: Mapping[str, Mapping[str, Line]]) -> 
     out = [
         "# Library report",
         "",
-        f"{_count(len(packages), 'package')} scanned, "
+        f"{count(len(packages), 'package')} scanned, "
         f"{len(carriers)} with `.libs/` shared libraries, "
-        f"{_count(len(found), 'prefix', 'prefixes')}, ordered by how many "
+        f"{count(len(found), 'prefix', 'prefixes')}, ordered by how many "
         "wheels carry them.",
         "",
         "Templates use only strings in data sections that pass the noise "
@@ -118,27 +118,27 @@ def report(packages: Sequence[str], lines: Mapping[str, Mapping[str, Line]]) -> 
         "",
     ]
     out += [
-        f"{i}. {_code(entry.name)}: {_count(len(entry.packages), 'wheel')}, "
-        f"{_count(entry.files, 'file')}"
+        f"{i}. {code(entry.name)}: {count(len(entry.packages), 'wheel')}, "
+        f"{count(entry.files, 'file')}"
         for i, entry in enumerate(found, 1)
     ]
     for i, entry in enumerate(found, 1):
         ranked = sorted(entry.wheels, key=lambda t: (-len(entry.wheels[t]), t))
         out += [
             "",
-            f"## {i}. {_code(entry.name)}: {_count(len(ranked), 'template')}",
+            f"## {i}. {code(entry.name)}: {count(len(ranked), 'template')}",
             "",
-            f"{_count(len(entry.packages), 'wheel')}, "
-            f"{_count(entry.files, 'file')}: {', '.join(entry.packages)}",
+            f"{count(len(entry.packages), 'wheel')}, "
+            f"{count(entry.files, 'file')}: {', '.join(entry.packages)}",
             "",
         ]
         if not ranked:
             out.append("No usable strings.")
         for j, template in enumerate(ranked, 1):
-            wheels = _count(len(entry.wheels[template]), "wheel")
+            wheels = count(len(entry.wheels[template]), "wheel")
             out += [
-                f"{j}. {wheels}: {_code(template)}",
-                f"   - e.g. {_code(entry.examples[template])}",
+                f"{j}. {wheels}: {code(template)}",
+                f"   - e.g. {code(entry.examples[template])}",
             ]
     return "\n".join(out) + "\n"
 

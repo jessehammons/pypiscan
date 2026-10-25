@@ -1,13 +1,14 @@
 """Run a package list through the scan's phases, one finished phase at a time.
 
 See README "How a scan runs". Each phase writes ``NN-<phase>.jsonl.partial``
-with one line per package, or in phases 06, 07 and 10 per library, and renames
+with one line per package, or in phases 06, 07 and 11 per library, and renames
 it when every one is done, so an episode directory only ever holds whole phase
 files plus at most one ``.partial`` left by an interrupted run.
 """
 
 import hashlib
 import importlib.metadata
+import io
 import json
 import re
 import signal
@@ -17,12 +18,14 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Protocol, TextIO, cast
+from typing import NamedTuple, Protocol, TextIO, cast
 
 from elftools.common.exceptions import ELFError
+from elftools.elf.elffile import ELFFile
 
 from pypiscan import fingerprint, version_function
 from pypiscan.cve_table import CveTableError, load_cve_table
+from pypiscan.detectors import DETECTORS
 from pypiscan.fetch import download
 from pypiscan.fingerprint_report import report as fingerprint_report
 from pypiscan.git import GitError, clone_or_fetch, tags
@@ -59,6 +62,7 @@ from pypiscan.pypi import (
 )
 from pypiscan.sbom_report import report as sbom_report
 from pypiscan.staleness_report import report as staleness_report
+from pypiscan.static_report import report as static_report
 from pypiscan.wheel_inspect import (
     ZIP_ERRORS,
     SkippedMember,
@@ -72,6 +76,7 @@ SCHEMA_VERSION = 1
 # Phase 06's lines gained each tag's date (roadmap S.1), then whether it is
 # a release (S.3).
 UPSTREAM_SCHEMA_VERSION = 3
+STATIC_SCHEMA_VERSION = 1
 EPISODE_SCHEMA_VERSION = 2
 MB = 1_000_000
 WHEEL_SIZE_LIMIT = 100 * MB
@@ -81,8 +86,8 @@ STATUSES = ("ok", "skipped", "error")
 EXIT_PREFLIGHT = 2
 EXIT_MANUAL_STEP = 3
 EXIT_INTERRUPTED = 130
-# The values --stop-after takes: the number of each phase, 01 to 10.
-PHASE_NUMBERS = tuple(f"{n:02d}" for n in range(1, 11))
+# The values --stop-after takes: the number of each phase, 01 to 11.
+PHASE_NUMBERS = tuple(f"{n:02d}" for n in range(1, 12))
 PHASE_FILE = re.compile(r"(\d\d)-[a-z0-9-]+\.jsonl(\.partial)?")
 
 Line = dict[str, object]
@@ -255,15 +260,22 @@ def libraries_phase(episode: Path) -> Phase[Package]:
     return Phase("05-libraries", run, finish)
 
 
-# A compiled recognizer: its library, kind, and whole-string matcher or
-# parsed version function.
-type Recognizer = tuple[str, fingerprint.Kind, re.Pattern[str] | VersionFunction]
+class Recognizer(NamedTuple):
+    """A recognizer from phase 07's lines: its library, kind and map pattern,
+    compiled to a whole-string matcher or a parsed version function."""
+
+    library: str
+    kind: fingerprint.Kind
+    pattern: str
+    compiled: re.Pattern[str] | VersionFunction
+
+
 # What pyelftools raises on malformed input; see wheel_inspect._needed.
 ELF_ERRORS = (ELFError, AssertionError, ValueError, OverflowError)
 
 
 class MemberError(Exception):
-    """A `.libs/` file can't be read from the wheel as phase 04 saw it."""
+    """A binary can't be read from the wheel as phase 04 saw it."""
 
 
 def read_members(wheel: Path, expected: Mapping[str, str]) -> dict[str, bytes]:
@@ -299,6 +311,31 @@ def _code_matches(
     return [] if found is None else [found]
 
 
+def compile_recognizers(
+    recognizer_lines: Sequence[Line],
+) -> dict[str, list[Recognizer]]:
+    """The recognizers in phase 07's ``ok`` lines, keyed by prefix, in the
+    lines' order."""
+    by_prefix: dict[str, list[Recognizer]] = {}
+    for line in recognizer_lines:
+        if line["status"] != "ok":
+            continue
+        for entry in cast(list[dict[str, str]], line["recognizers"]):
+            kind = cast(fingerprint.Kind, entry["kind"])
+            pattern = entry["pattern"]
+            by_prefix.setdefault(entry["prefix"], []).append(
+                Recognizer(
+                    str(line["library"]),
+                    kind,
+                    pattern,
+                    parse_version_function(pattern)
+                    if kind == VERSION_FUNCTION
+                    else matcher(pattern, kind),
+                )
+            )
+    return by_prefix
+
+
 def fingerprint_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
     """Phase 08: run the recognizers in phase 07's ``ok`` lines on each
     `.libs/` file whose prefix they're listed under, over the file's strings
@@ -309,29 +346,14 @@ def fingerprint_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
     its matches join the file's string matches. Records follow phase 05's
     file order, then the libraries' order in phase 07's lines.
     """
-    by_prefix: dict[str, list[Recognizer]] = {}
-    for line in recognizer_lines:
-        if line["status"] != "ok":
-            continue
-        for entry in cast(list[dict[str, str]], line["recognizers"]):
-            kind = cast(fingerprint.Kind, entry["kind"])
-            pattern = entry["pattern"]
-            by_prefix.setdefault(entry["prefix"], []).append(
-                (
-                    str(line["library"]),
-                    kind,
-                    parse_version_function(pattern)
-                    if kind == VERSION_FUNCTION
-                    else matcher(pattern, kind),
-                )
-            )
+    by_prefix = compile_recognizers(recognizer_lines)
 
     def file_matches(
         prefix: str, binary: BinaryStrings, data: bytes | None
     ) -> dict[str, list[fingerprint.Match]]:
         strings = [s for s in binary["strings"] if usable(s)]
         matches: dict[str, list[fingerprint.Match]] = {}
-        for library, kind, recognizer in by_prefix.get(prefix, []):
+        for library, kind, _, recognizer in by_prefix.get(prefix, []):
             found = matches.setdefault(library, [])
             if isinstance(recognizer, VersionFunction):
                 found += _code_matches(
@@ -358,10 +380,7 @@ def fingerprint_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
         expected = {
             f["path"]: binaries[f["path"]]["sha256"]
             for f in files
-            if any(
-                kind == VERSION_FUNCTION
-                for _, kind, _ in by_prefix.get(f["prefix"], [])
-            )
+            if any(r.kind == VERSION_FUNCTION for r in by_prefix.get(f["prefix"], []))
         }
         records: list[object] = []
         try:
@@ -411,6 +430,114 @@ def sboms_phase() -> Phase[Package]:
         )
 
     return Phase("09-sboms", run)
+
+
+# The kinds phase 10 runs: both rest on a string, not on a `.libs/` file.
+STATIC_KINDS = ("library_string", "build_path")
+
+
+def _parse_elf(path: str, data: bytes) -> None:
+    """Raise ``MemberError`` if pyelftools can't parse ``data``'s sections."""
+    try:
+        for _ in ELFFile(io.BytesIO(data)).iter_sections():
+            pass
+    except ELF_ERRORS as exc:
+        raise MemberError(f"{path}: pyelftools can't parse it ({exc})") from exc
+
+
+def _candidate(
+    library: str,
+    version: str | None,
+    kind: str,
+    text: str,
+    offset: int | None,
+    section: str | None,
+    pattern: str | None = None,
+) -> Line:
+    """A phase 10 candidate; ``pattern`` is the map row's, or None for the
+    zlib detector."""
+    return {
+        "library": library,
+        "version": version,
+        "kind": kind,
+        "text": text,
+        "offset": offset,
+        "section": section,
+        "pattern": pattern,
+    }
+
+
+def static_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
+    """Phase 10: unconfirmed candidates for statically linked libraries in
+    each ELF binary in phase 04's records outside phase 05's `.libs/` files.
+
+    Candidates come from the ``library_string`` and ``build_path``
+    recognizers in phase 07's lines, under any prefix and each run once,
+    over the binary's strings that pass the noise filter; and from the zlib
+    detector's ``contains`` results, one per matched string of the result's
+    basis with that string's own version, over the binary's bytes read from
+    the wheel at phase 02's path. Binaries follow phase 04's order,
+    candidates their offset.
+    """
+    unique: dict[tuple[str, str, str], tuple[Recognizer, re.Pattern[str]]] = {}
+    for found in compile_recognizers(recognizer_lines).values():
+        for r in found:
+            if r.kind in STATIC_KINDS and isinstance(r.compiled, re.Pattern):
+                unique.setdefault((r.library, r.kind, r.pattern), (r, r.compiled))
+
+    def candidates(path: str, binary: BinaryStrings, data: bytes) -> list[Line]:
+        found = [
+            _candidate(
+                r.library, m[1], r.kind, s["text"], s["offset"], s["section"], r.pattern
+            )
+            for r, compiled in unique.values()
+            for s in binary["strings"]
+            if usable(s) and (m := compiled.fullmatch(s["text"]))
+        ]
+        # Each string of a contains result's basis, with its own version;
+        # a string the derivative rule reattributes has none.
+        for by_library in fingerprint.binary_matches(DETECTORS, path, data):
+            for matches in by_library.values():
+                result = fingerprint.resolve(matches)
+                if result is None or result[0] != "contains":
+                    continue
+                found += [
+                    _candidate(
+                        m.library, m.version, m.kind, m.text, m.offset, m.section
+                    )
+                    for m in matches
+                    if m.kind == result[1]
+                ]
+        found.sort(key=lambda c: (cast(int, c["offset"]), str(c["library"])))
+        return found
+
+    def run(package: Package, earlier: Mapping[str, Line]) -> Result:
+        strings_line = earlier["04-strings"]
+        wheel = cast(str, strings_line["wheel"])
+        files = cast(list[dict[str, str]], earlier["05-libraries"]["libraries"])
+        in_libs = {f["path"] for f in files}
+        fetched = Path(cast(str, earlier["02-fetch"]["path"]))
+        binaries: list[object] = []
+        try:
+            for binary in cast(list[BinaryStrings], strings_line["records"]):
+                path, sha256 = binary["path"], binary["sha256"]
+                if path in in_libs:
+                    continue
+                # One member at a time, so memory holds one binary.
+                data = read_members(fetched, {path: sha256})[path]
+                _parse_elf(path, data)
+                binaries.append(
+                    {
+                        "path": path,
+                        "sha256": sha256,
+                        "candidates": candidates(path, binary, data),
+                    }
+                )
+        except MemberError as exc:
+            return Result("error", str(exc))
+        return Result("ok", None, {"wheel": wheel, "binaries": binaries})
+
+    return Phase("10-static", run, schema_version=STATIC_SCHEMA_VERSION)
 
 
 def phases(client: HttpClient, cache_dir: Path, episode: Path) -> list[Phase[Package]]:
@@ -528,7 +655,7 @@ def library_phases(
 
 
 def cves_phase(client: HttpClient, sleep: Callable[[float], None]) -> Phase[Library]:
-    """Phase 10: candidate CVEs from NVD, by each of the library's CPE names.
+    """Phase 11: candidate CVEs from NVD, by each of the library's CPE names.
 
     One pacer serves the whole phase, so requests are paced across
     libraries too. A library whose cpe is ``none`` is ``skipped`` with
@@ -546,7 +673,7 @@ def cves_phase(client: HttpClient, sleep: Callable[[float], None]) -> Phase[Libr
         except NvdError as exc:
             return Result("error", str(exc), {"cpe": cast(object, names)})
 
-    return Phase("10-cves", run, skip_not_ok=False)
+    return Phase("11-cves", run, skip_not_ok=False)
 
 
 def write_json(path: Path, value: object) -> None:
@@ -575,16 +702,19 @@ def git_work_tree(path: Path) -> Path | None:
 
 
 def _phase_file_problems(episode: Path) -> list[str]:
-    """Check 3: finished phase files form a run 01, 02, … with no .partial."""
+    """Check 3: finished phase files form a run 01, 02, … with no .partial,
+    and no two phase files share a number."""
     if not episode.is_dir():
         return []
     finished: dict[str, int] = {}
+    by_number: dict[str, list[str]] = {}
     problems: list[str] = []
     for path in sorted(episode.iterdir()):
         match = PHASE_FILE.fullmatch(path.name)
         if not match:
             continue
         number = match[1]
+        by_number.setdefault(number, []).append(path.name)
         if match[2]:
             problems.append(
                 f"{path.name} exists; an earlier run stopped in phase {number}. "
@@ -599,6 +729,12 @@ def _phase_file_problems(episode: Path) -> list[str]:
         f"{name} exists but phase {gap:02d} is not finished. Delete {name}."
         for name, number in finished.items()
         if number > gap
+    )
+    problems.extend(
+        f"{', '.join(names)} share phase number {number}. Delete the ones this "
+        "version's phases don't name."
+        for number, names in by_number.items()
+        if len(names) > 1
     )
     return problems
 
@@ -897,6 +1033,27 @@ def write_staleness_report(
     (episode / "staleness-report.md").write_text(text, encoding="utf-8")
 
 
+def write_static_report(
+    episode: Path,
+    packages: Sequence[Package],
+    part_1: Sequence[str],
+    rows: Sequence[MapRow],
+    ambiguous: Ambiguous,
+) -> None:
+    """Rewrite static-report.md from part 1's phases (01 to 05), 08, 09 and
+    10; ``part_1`` names part 1's phases. Phases other than 04, 05 and 10
+    only show where a package stopped."""
+    names = [*part_1, "08-fingerprint", "09-sboms"]
+    text = static_report(
+        packages,
+        {name: _read_lines(episode / f"{name}.jsonl") for name in names},
+        _read_lines(episode / "10-static.jsonl"),
+        rows,
+        ambiguous,
+    )
+    (episode / "static-report.md").write_text(text, encoding="utf-8")
+
+
 def scan(
     package_list: Path,
     library_map: Path,
@@ -913,7 +1070,7 @@ def scan(
     stop_after: str | None = None,
 ) -> int:
     """Pre-flight, then create the directories, record episode.json and run.
-    ``sleep`` paces phase 10's requests to NVD. ``stop_after``, a phase's
+    ``sleep`` paces phase 11's requests to NVD. ``stop_after``, a phase's
     number, ends the run with exit 0 once that phase is finished."""
     packages, rows, ambiguous, eols, count, problems = preflight(
         package_list,
@@ -963,11 +1120,16 @@ def scan(
         )
         if status or _stopped(part_2, stop_after, err):
             return status
-        # Phases 08 and 09 are per package again, after the per-library
-        # phases: 08 runs the recognizers phase 07 recorded, and its skip
-        # rule looks at part 1's lines.
+        # Phases 08 to 10 are per package again, after the per-library
+        # phases: 08 and 10 run the recognizers phase 07 recorded, and 08's
+        # skip rule looks at part 1's lines.
         recognizers = _read_lines(episode / "07-recognizers.jsonl", "library")
-        part_3 = [fingerprint_phase(list(recognizers.values())), sboms_phase()]
+        recognizer_lines = list(recognizers.values())
+        part_3 = [
+            fingerprint_phase(recognizer_lines),
+            sboms_phase(),
+            static_phase(recognizer_lines),
+        ]
         names = [phase.name for phase in part_1]
         status = run_phases(
             episode, packages, _through(part_3, stop_after), stop, err, finished=names
@@ -979,9 +1141,11 @@ def scan(
             write_staleness_report(episode, packages, names, rows, ambiguous, eols)
         if (episode / "09-sboms.jsonl").is_file():
             write_sbom_report(episode, packages, names, rows, ambiguous)
+        if (episode / "10-static.jsonl").is_file():
+            write_static_report(episode, packages, names, rows, ambiguous)
         if status or _stopped(part_3, stop_after, err):
             return status
-        # Phase 10 is per library again, and reads no earlier phase.
+        # Phase 11 is per library again, and reads no earlier phase.
         part_4 = [cves_phase(client, sleep)]
         status = run_phases(episode, libraries, part_4, stop, err, key="library")
         if not status:

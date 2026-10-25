@@ -138,7 +138,7 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
         "--stop-after",
         choices=PHASE_NUMBERS,
         metavar="NN",
-        help="Stop once phase NN (01 to 10) is finished, with exit 0.",
+        help="Stop once phase NN (01 to 11) is finished, with exit 0.",
     )
     args = parser.parse_args(argv)
     if args.command == "scan":

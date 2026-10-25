@@ -204,13 +204,12 @@ def record(
     }
 
 
-def fingerprint_binary(
-    detectors: Iterable[Detector], wheel_name: str, path: str, data: bytes
-) -> list[FingerprintRecord]:
-    """Return one record per library detected in one binary."""
-    sha256 = hashlib.sha256(data).hexdigest()
+def binary_matches(
+    detectors: Iterable[Detector], path: str, data: bytes
+) -> list[dict[str, list[Match]]]:
+    """Each detector's matches in one binary, by library, with sections."""
     mapped: Sections | None = None
-    records: list[FingerprintRecord] = []
+    found: list[dict[str, list[Match]]] = []
     for detector in detectors:
         by_library: dict[str, list[Match]] = {}
         for m in _matches(detector, path, data):
@@ -219,10 +218,21 @@ def fingerprint_binary(
                     mapped = sections(data)
                 m.section = section_at(mapped, m.offset)
             by_library.setdefault(m.library, []).append(m)
-        for library, matches in by_library.items():
-            if found := record(wheel_name, path, sha256, library, matches):
-                records.append(found)
-    return records
+        found.append(by_library)
+    return found
+
+
+def fingerprint_binary(
+    detectors: Iterable[Detector], wheel_name: str, path: str, data: bytes
+) -> list[FingerprintRecord]:
+    """Return one record per library detected in one binary."""
+    sha256 = hashlib.sha256(data).hexdigest()
+    return [
+        found
+        for by_library in binary_matches(detectors, path, data)
+        for library, matches in by_library.items()
+        if (found := record(wheel_name, path, sha256, library, matches))
+    ]
 
 
 def fingerprint_wheel(

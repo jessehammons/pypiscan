@@ -909,8 +909,9 @@ Rules:
      CVE table (roadmap 6.1) and the list of lines' ends of life
      (roadmap S.4).
   3. The episode's phase files are a run of finished phases with no gaps
-     (01, 02, …) and no `.partial` file. Otherwise the error names every
-     file to delete.
+     (01, 02, …), no `.partial` file, and no two files, finished or
+     `.partial`, with one number, such as `10-cves.jsonl` beside
+     `10-static.jsonl`. Otherwise the error names every file to delete.
   4. If the episode has an `episode.json`, it matches this run's inputs: the
      list file's sha256, the count after clamping, the target and both size
      limits. A smoke run at `--count 2` and another at `--count 10`
@@ -980,14 +981,19 @@ two sources:
   noise filter;
 - the hand-written zlib detector (roadmap 2.1), since zlib has no map
   row, run over the binary's bytes, read from the wheel at phase 02's
-  path. Its `contains` results are candidates, with their basis as the
-  kind; its `compiled_against` results are not.
+  path. Each string of a `contains` result's basis is a candidate, with
+  that basis as its kind and its own string's version, so two zlib
+  copies in one binary keep both versions. A string the derivative rule
+  reattributes, such as zlib's banners beside zlib-ng's own string,
+  stays the derivative's with no version. Its `compiled_against`
+  results are not candidates.
 
 Each candidate records the library, the version, the kind, the matched
-string, and its file offset and ELF section. Each file phase 10 reads
-must match phase 04's sha256. A missing wheel or member, a changed file
-or an ELF pyelftools can't parse makes the package's line `error`, so
-rerunning phase 10 needs the wheel cache. `bare_version` and
+string, its file offset and ELF section, and the map row's pattern, or
+none for the zlib detector. Each file phase 10 reads must match phase
+04's sha256. A missing wheel or member, a changed file or an ELF
+pyelftools can't parse makes the package's line `error`, so rerunning
+phase 10 needs the wheel cache. `bare_version` and
 `version_function_machine_code` rows don't run here: both rest on a
 `.libs/` file, a bare version on its prefix and a version function on
 the file's exported symbols.
@@ -1006,7 +1012,8 @@ string risk; and distinct templates.
 **Candidates.** For each package, each candidate with its member,
 library, version, kind and matched string, labeled "unconfirmed static
 candidate", with an ambiguous version marked as the fingerprint report
-marks it.
+marks it, and "conflict" when a binary's candidates for one library
+give different versions.
 
 - A candidate whose map row's **identity_file** is a header (`.h` or
   `.h.in`), such as OpenSSL's `include/openssl/opensslv.h.in` and
@@ -1258,7 +1265,7 @@ package list and a top-500 scan. It starts with a measurement, T.1,
 which shows how much static code there is before any recognizer is
 written for it.
 
-- **T.1** Phase 10 and the static discovery report, as described in
+- **T.1** ✓ Phase 10 and the static discovery report, as described in
   [The static discovery report](#the-static-discovery-report). The CVE
   phase becomes 11 and matching 12, so an episode stopped after phase 09
   needs no phase file deleted, and `--stop-after` takes 01 to 11. Tests
@@ -1267,7 +1274,7 @@ written for it.
   phase 10 runs. The candidates include lxml 6.1.3's zlib 1.3.2 in
   `lxml/etree` and `lxml/objectify`, and grpcio 1.84.0's zlib 1.3.1.1 in
   `grpc/_cython/cygrpc`, 2.1's known answers. Review reads the counts,
-  the candidates and about the top 100 templates. ← current
+  the candidates and about the top 100 templates.
 - **T.2** *(maintainer input)* Which libraries to detect in binaries
   outside `.libs/`, and with which patterns, chosen from T.1's report and
   the wheels' SBOM claims (see [SBOMs in wheels](#sboms-in-wheels)):
@@ -1278,7 +1285,7 @@ written for it.
   never set a version. Only a pattern whose string can't be a header
   string qualifies: a string from a library's public header, such as
   OpenSSL's, shows what a binary was compiled against, not that it
-  contains the library.
+  contains the library. ← current
 - **T.3** Static records. Fingerprint output gets records for T.2's
   patterns in binaries outside `.libs/`, marked as static, and the
   staleness report gets rows for them. The derivative rule applies to
@@ -1669,6 +1676,22 @@ again only rows.
   private header no caller includes, so its candidates are marked
   though they can't be header strings. A per-row rule for public
   headers would fix it.
+- **Which half of zlib a binary holds.** zlib's deflate and inflate
+  banners come from `deflate.c` and `inftrees.c`, and a static link
+  pulls in only the objects it uses, so a binary can hold one half.
+  Some CVEs affect one half: CVE-2022-37434 is in inflate,
+  CVE-2018-25032 in deflate. zlib stays one library, and matching could
+  record which halves are present.
+- **Rust source paths in the static templates.** In the top-100 run,
+  about 90 of the static discovery report's top 100 templates are Rust
+  crate source paths (`/rust/deps/…` and `.cargo/registry/…`), one per
+  `.rs` file, so they crowd out the C libraries' strings. The paths
+  carry crate versions, such as `aws-lc-sys`'s, that T.2 reads, so a
+  noise rule would hide them; collapsing each path to its crate
+  directory would keep one template per crate.
+- **Phase files from an older numbering.** A lone `10-cves.jsonl` from
+  before T.1 passes pre-flight as phase 10. Checking each file's name
+  against its number's phase would catch it.
 - **Checking patterns at every release tag.** Statically linked libraries
   and time-to-patch need older releases, whose strings can be worded
   differently: before 2.1.0, zlib-ng named and worded its identity string

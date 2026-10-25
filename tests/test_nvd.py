@@ -186,7 +186,7 @@ def test_pacer_is_shared_across_libraries() -> None:
     slept: list[float] = []
     client = Client({url("a:a"): page(), url("b:b"): page()})
     phase = cves_phase(client, slept.append)
-    assert phase.name == "10-cves" and not phase.skip_not_ok
+    assert phase.name == "11-cves" and not phase.skip_not_ok
     assert phase.run(Library("a", "r", "v{version}", "a:a"), {}).status == "ok"
     assert slept == []
     assert phase.run(Library("b", "r", "v{version}", "b:b"), {}).status == "ok"
@@ -450,17 +450,17 @@ def phase_run(pages: dict[str, bytes], cpe: str) -> Result:
     return phase.run(Library("lib", "r", "v{version}", cpe), {})
 
 
-def test_phase_10_skips_a_library_whose_cpe_is_none() -> None:
+def test_phase_11_skips_a_library_whose_cpe_is_none() -> None:
     assert phase_run({}, "none") == Result("skipped", "no_cpe", {"cpe": []})
 
 
-def test_phase_10_error_has_no_candidates() -> None:
+def test_phase_11_error_has_no_candidates() -> None:
     pages = {url("a:a"): page(cve("CVE-2024-0001"))}
     result = phase_run(pages, "a:a b:b")
     assert result == Result("error", f"{url('b:b')}: HTTP 404", {"cpe": ["a:a", "b:b"]})
 
 
-def test_phase_10_ok_line() -> None:
+def test_phase_11_ok_line() -> None:
     result = phase_run({url("a:a"): page(cve("CVE-2024-0001"))}, "a:a")
     assert result.status == "ok"
     assert set(result.data) == {"cpe", "nvd_timestamp", "total", "candidates"}

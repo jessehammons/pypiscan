@@ -279,6 +279,21 @@ def test_gap_in_phase_files_names_files_to_delete(
     assert "01-resolve.jsonl exists" not in err
 
 
+def test_two_phase_files_with_one_number_stop_preflight(
+    dirs: Dirs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dirs.episode.mkdir()
+    # A phase 10 file from before T.1's renumbering, beside the new one.
+    (dirs.episode / "10-cves.jsonl").write_text("")
+    (dirs.episode / "10-static.jsonl.partial").write_text("")
+    assert run(dirs, "--count", "1") == 2
+    err = capsys.readouterr().err
+    assert (
+        "10-cves.jsonl, 10-static.jsonl.partial share phase number 10. Delete "
+        "the ones this version's phases don't name." in err
+    )
+
+
 def phase(name: str, status: str = "ok", reason: str | None = None) -> Phase:
     def go(package: Package, earlier: Mapping[str, Line]) -> Result:
         return Result(status, reason, {"seen": list(earlier)})
@@ -881,8 +896,10 @@ def test_scan_stops_for_the_manual_step(
     assert "07-recognizers: 1 ok, 0 skipped, 0 error" in err
     assert "08-fingerprint: 2 ok, 1 skipped, 0 error" in err
     assert "09-sboms: 2 ok, 1 skipped, 0 error" in err
-    # libpng's cpe is none, so phase 10 asks NVD nothing.
-    assert err.endswith("10-cves: 0 ok, 1 skipped, 0 error\n")
+    # demo's phase 04 lists demo/_ext.so, which its wheel doesn't hold.
+    assert "10-static: 1 ok, 1 skipped, 1 error" in err
+    # libpng's cpe is none, so phase 11 asks NVD nothing.
+    assert err.endswith("11-cves: 0 ok, 1 skipped, 0 error\n")
     assert todo.read_text() == f"{header}\n"
     [libpng] = dirs.lines("06-upstream")
     assert libpng["library"] == "libpng"
@@ -926,23 +943,35 @@ def test_scan_stops_for_the_manual_step(
     assert (pure["status"], pure["records"]) == ("ok", [])
     assert (missing["status"], missing["reason"]) == ("skipped", "01-resolve")
 
-    # A rerun skips every phase, phases 08 and 09 included, and lists each
+    demo, pure, missing = dirs.lines("10-static")
+    assert (demo["status"], demo["reason"]) == (
+        "error",
+        "demo/_ext.so is missing from demo.whl",
+    )
+    assert pure["status"] == "ok" and pure["binaries"] == []
+    assert (missing["status"], missing["reason"]) == ("skipped", "01-resolve")
+    text = (dirs.episode / "static-report.md").read_text()
+    assert "error at 10-static: demo/_ext.so is missing from demo.whl" in text
+    assert "error at 01-resolve: HTTP 404" in text
+
+    # A rerun skips every phase, phases 08 to 10 included, and lists each
     # once.
     assert run(dirs, "--count", "3") == 0
     err = capsys.readouterr().err
     assert "08-fingerprint: already finished, skipped" in err
     assert "09-sboms: already finished, skipped\n" in err
-    assert err.endswith("10-cves: already finished, skipped\n")
+    assert "10-static: already finished, skipped\n" in err
+    assert err.endswith("11-cves: already finished, skipped\n")
     assert err.count("05-libraries: already finished, skipped") == 1
 
-    # An episode finished through phase 08 before phase 09 existed runs only
-    # phases 09 and 10, with no file deleted.
+    # Deleting phases 09 to 11 reruns only them.
     lines_09 = dirs.lines("09-sboms")
-    (dirs.episode / "10-cves.jsonl").unlink()
+    (dirs.episode / "11-cves.jsonl").unlink()
+    (dirs.episode / "10-static.jsonl").unlink()
     (dirs.episode / "09-sboms.jsonl").unlink()
     assert run(dirs, "--count", "3") == 0
     err = capsys.readouterr().err
-    *finished, last, cves = err.splitlines()
+    *finished, last, static, cves = err.splitlines()
     assert finished == [
         f"{name}: already finished, skipped"
         for name in [
@@ -957,7 +986,8 @@ def test_scan_stops_for_the_manual_step(
         ]
     ]
     assert last == "09-sboms: 2 ok, 1 skipped, 0 error"
-    assert cves == "10-cves: 0 ok, 1 skipped, 0 error"
+    assert static == "10-static: 1 ok, 1 skipped, 1 error"
+    assert cves == "11-cves: 0 ok, 1 skipped, 0 error"
     assert dirs.lines("09-sboms") == lines_09
 
     # Every run with phase 08 finished rewrites the fingerprint report.
@@ -1261,7 +1291,8 @@ def test_changed_map_after_phase_06_fails_preflight(
     assert capsys.readouterr().err == (
         "pypiscan scan: error: the library map has changed since phase 06 ran. "
         "Delete 06-upstream.jsonl, 07-recognizers.jsonl, 08-fingerprint.jsonl, "
-        "09-sboms.jsonl, 10-cves.jsonl to rerun phase 06 and every later phase.\n"
+        "09-sboms.jsonl, 10-static.jsonl, 11-cves.jsonl to rerun phase 06 and "
+        "every later phase.\n"
     )
 
     # Without a recorded sha256, the map can't be checked either.
@@ -1741,10 +1772,10 @@ def test_cve_table_is_checked_against_the_map(
     assert "cve" not in (dirs.episode / "episode.json").read_text()
 
 
-# Phase 10, candidate CVEs from NVD (roadmap 6.2).
+# Phase 11, candidate CVEs from NVD (roadmap 6.2).
 
 
-def test_phase_10_runs_last_once_per_library(
+def test_phase_11_runs_last_once_per_library(
     dirs: Dirs, capsys: pytest.CaptureFixture[str]
 ) -> None:
     webp = "libwebp,libwebp,https://chromium.googlesource.com/webm/libwebp,v{version},,single_line"
@@ -1759,9 +1790,9 @@ def test_phase_10_runs_last_once_per_library(
     recorded = (Path(__file__).with_name("nvd") / "CVE-2023-4863.json").read_bytes()
     client = RecordedClient({query: recorded})
     assert main(dirs.argv("--count", "1"), client=client) == 0
-    assert capsys.readouterr().err.endswith("10-cves: 1 ok, 1 skipped, 0 error\n")
+    assert capsys.readouterr().err.endswith("11-cves: 1 ok, 1 skipped, 0 error\n")
     assert [url for url in client.requested if "nvd" in url] == [query]
-    webp_line, geos_line = dirs.lines("10-cves")
+    webp_line, geos_line = dirs.lines("11-cves")
     assert (webp_line["library"], webp_line["status"]) == ("libwebp", "ok")
     [found] = cast(list[Line], webp_line["candidates"])
     assert (found["id"], found["scope"]) == ("CVE-2023-4863", "in")
@@ -1774,7 +1805,7 @@ def test_phase_10_runs_last_once_per_library(
     }
 
 
-def test_phase_10_waits_between_requests_across_libraries(dirs: Dirs) -> None:
+def test_phase_11_waits_between_requests_across_libraries(dirs: Dirs) -> None:
     rows = [
         f"lib{name},{name},https://example.org/{name},v{{version}},,single_line,,,,,{name}:{name},"
         for name in ("a", "b")
@@ -1796,8 +1827,8 @@ def test_phase_10_waits_between_requests_across_libraries(dirs: Dirs) -> None:
     )
     assert status == 0
     # The recorded client answers NVD's URLs with a wheel's bytes.
-    assert [line["status"] for line in dirs.lines("10-cves")] == ["error", "error"]
-    assert "response is not JSON" in str(dirs.lines("10-cves")[0]["reason"])
+    assert [line["status"] for line in dirs.lines("11-cves")] == ["error", "error"]
+    assert "response is not JSON" in str(dirs.lines("11-cves")[0]["reason"])
     assert slept == [6]
 
 
@@ -1822,7 +1853,7 @@ def test_stop_during_part_3_leaves_no_phase_10(
     assert not list(dirs.episode.glob("10-*"))
 
 
-@pytest.mark.parametrize("value", ["9", "00", "11", "ab"])
+@pytest.mark.parametrize("value", ["9", "00", "12", "ab"])
 def test_stop_after_takes_only_a_phase_number(
     dirs: Dirs, value: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1853,7 +1884,7 @@ def test_stop_after_a_part_1_phase_then_carry_on(
     err = capsys.readouterr().err
     assert "03-inspect: 0 ok, 2 skipped, 1 error" in err
     assert "stopped" not in err
-    assert err.endswith("10-cves: 0 ok, 0 skipped, 0 error\n")
+    assert err.endswith("11-cves: 0 ok, 0 skipped, 0 error\n")
 
 
 def test_manual_step_before_stop_after_still_exits_3(
@@ -1898,7 +1929,7 @@ def test_stop_after_writes_the_reports_finished_phases_allow(
     )
     assert (dirs.episode / "staleness-report.md").is_file()
 
-    # Stopping after part 2's last phase or phase 10.
+    # Stopping after part 2's last phase, phase 10 or phase 11.
     (dirs.episode / "08-fingerprint.jsonl").unlink()
     assert run(dirs, "--count", "3", "--stop-after", "07") == 0
     assert capsys.readouterr().err.endswith(
@@ -1908,5 +1939,12 @@ def test_stop_after_writes_the_reports_finished_phases_allow(
     assert run(dirs, "--count", "3", "--stop-after", "10") == 0
     err = capsys.readouterr().err
     assert "09-sboms: 2 ok, 1 skipped, 0 error" in err
-    assert err.endswith("10-cves: 0 ok, 1 skipped, 0 error\nstopped after 10-cves\n")
+    assert err.endswith(
+        "10-static: 1 ok, 1 skipped, 1 error\nstopped after 10-static\n"
+    )
     assert (dirs.episode / "sbom-report.md").is_file()
+    assert (dirs.episode / "static-report.md").is_file()
+    assert not list(dirs.episode.glob("11-*"))
+    assert run(dirs, "--count", "3", "--stop-after", "11") == 0
+    err = capsys.readouterr().err
+    assert err.endswith("11-cves: 0 ok, 1 skipped, 0 error\nstopped after 11-cves\n")

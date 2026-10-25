@@ -34,6 +34,12 @@ def row(*cells: str) -> str:
     return "| " + " | ".join(cell(c) for c in cells) + " |"
 
 
+def ambiguous_note(library: str, version: str, ambiguous: Ambiguous) -> str:
+    """``ambiguous: may also be …`` for a version the list marks, else ``""``."""
+    others = ambiguous.get(library, {}).get(version, [])
+    return f"ambiguous: may also be {' or '.join(others)}" if others else ""
+
+
 def _recorded(record: Line, ambiguous: Ambiguous) -> tuple[str, str, str]:
     """Version, basis and note for a library with a phase 08 record."""
     version, basis = record["version"], str(record["basis"])
@@ -44,9 +50,10 @@ def _recorded(record: Line, ambiguous: Ambiguous) -> tuple[str, str, str]:
         notes.append("conflict")
     if basis == "bare_version":
         notes.append("needs another source")
-    others = ambiguous.get(str(record["library"]), {}).get(str(version), [])
-    if version is not None and others:
-        notes.append(f"ambiguous: may also be {' or '.join(others)}")
+    if version is not None and (
+        note := ambiguous_note(str(record["library"]), str(version), ambiguous)
+    ):
+        notes.append(note)
     if version is None:
         return NONE, NONE, "; ".join(notes)
     return str(version), basis, "; ".join(notes)
