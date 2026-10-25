@@ -2,9 +2,10 @@
 upstream's releases on the day the wheel was uploaded.
 
 See README "The staleness report" (roadmap S.1). ``report`` is a pure function
-of phases 01 to 05, 06 and 08's lines, the library map's rows and the list of
-ambiguous versions; ``scan`` writes the result as ``staleness-report.md``. It
-names no CVE: it is a measurement, not a finding.
+of phases 01 to 05, 06 and 08's lines, the library map's rows, the list of
+ambiguous versions and the lines' ends of life (roadmap S.4); ``scan``
+writes the result as ``staleness-report.md``. It names no CVE: it is a
+measurement, not a finding.
 """
 
 import re
@@ -24,7 +25,15 @@ from pypiscan.fingerprint_report import (
     row,
     stopped,
 )
-from pypiscan.library_map import SKIP, Ambiguous, MapRow
+from pypiscan.library_map import (
+    MAINTAINED,
+    SINGLE_LINE,
+    SKIP,
+    Ambiguous,
+    LineEol,
+    MapRow,
+    release_line,
+)
 from pypiscan.package_list import Package
 
 # Phase 06's lines from this schema_version on list each tag's date and
@@ -44,8 +53,11 @@ it rests on; see "The staleness report" in the README.
 """
 HEADER = (
     "| file | library | version | basis | note | newest at upload "
-    "| newer | days behind |\n|---|---|---|---|---|---|---|---|"
+    "| newer | days behind | line | line status | newest on line at upload "
+    "| days behind on line |\n|---|---|---|---|---|---|---|---|---|---|---|---|"
 )
+# The line cell of a library that maintains one line.
+ALL = "all"
 
 type Key = tuple[int, ...]
 
@@ -80,15 +92,47 @@ def _not_compared(upstream: Line) -> str | None:
     return None
 
 
+def _lag(
+    found: Mapping[Key, tuple[str, date]], read_as: Key, uploaded: date
+) -> tuple[str, str, str]:
+    """Newest release at upload, newer releases and days behind, among
+    ``found``."""
+    newer = sorted(
+        (key, day)
+        for key, (_, day) in found.items()
+        if key > read_as and day <= uploaded
+    )
+    if not newer:
+        version, day = found[read_as]
+        return f"{version} ({day})", "0", "0"
+    newest, newest_day = found[newer[-1][0]]
+    behind = (uploaded - min(day for _, day in newer)).days
+    return f"{newest} ({newest_day})", str(len(newer)), str(behind)
+
+
+def line_status(eol: str | None, uploaded: date) -> str:
+    """A line's status on the upload day, from its eol in the list of lines'
+    ends of life, or ``None`` when the list leaves it out."""
+    if eol is None:
+        return "unknown"
+    if eol == MAINTAINED or date.fromisoformat(eol) > uploaded:
+        return "maintained"
+    return f"EOL {eol}"
+
+
 def staleness(
     version: str,
     others: Sequence[str],
     upstream: Line,
     uploaded: date,
-) -> tuple[str, str, str, str] | str:
-    """Note, newest release at upload, newer releases and days behind, or the
-    reason the version isn't compared. An ambiguous version is read as the
-    newest release it may be."""
+    line: str = SINGLE_LINE,
+    eols: Mapping[str, str] | None = None,
+) -> tuple[str, ...] | str:
+    """Note, newest release at upload, newer releases, days behind, line,
+    line status, newest on the line at upload and days behind on the line,
+    or the reason the version isn't compared. An ambiguous version is read
+    as the newest release it may be. ``line`` is the library's line column
+    and ``eols`` its lines' ends of life."""
     found = releases(upstream)
     bundled = [
         key
@@ -98,18 +142,16 @@ def staleness(
     if not bundled:
         return NO_TAG
     read_as = max(bundled)
-    newer = sorted(
-        (key, day)
-        for key, (_, day) in found.items()
-        if key > read_as and day <= uploaded
-    )
     note = f"read as {found[read_as][0]}" if others else ""
-    if not newer:
-        version_, day = found[read_as]
-        return note, f"{version_} ({day})", "0", "0"
-    newest, newest_day = found[newer[-1][0]]
-    behind = (uploaded - min(day for _, day in newer)).days
-    return note, f"{newest} ({newest_day})", str(len(newer)), str(behind)
+    newest, newer, behind = _lag(found, read_as, uploaded)
+    on_line = release_line(found[read_as][0], line)
+    if on_line is None:
+        return note, newest, newer, behind, ALL, "single line", newest, behind
+    n = len(on_line.split("."))
+    same = {k: v for k, v in found.items() if k[:n] == read_as[:n]}
+    line_newest, _, line_behind = _lag(same, read_as, uploaded)
+    status = line_status((eols or {}).get(on_line), uploaded)
+    return note, newest, newer, behind, on_line, status, line_newest, line_behind
 
 
 def _row(
@@ -120,16 +162,18 @@ def _row(
     upstream: Line | None,
     uploaded: date,
     ambiguous: Ambiguous,
+    lines: tuple[Mapping[str, str], LineEol],
     counts: Counter[str],
 ) -> str:
     version, basis, note = cells(library, record, recognized, ambiguous)
+    blank = [NONE] * 6
     if library == SKIP:
         counts["skipped"] += 1
-        return row(name, library, version, basis, note, "skipped", NONE, NONE)
+        return row(name, library, version, basis, note, "skipped", *blank)
     notes = [note] if note else []
     if basis == "bare_version":
         notes.insert(0, "hint")
-    result: tuple[str, str, str, str] | str
+    result: tuple[str, ...] | str
     if record is None or record["version"] is None:
         result = missing(library, record, recognized)
     elif upstream is None:
@@ -138,15 +182,21 @@ def _row(
         result = why
     else:
         others = ambiguous.get(library, {}).get(version, [])
-        result = staleness(version, others, upstream, uploaded)
+        line, eols = lines[0].get(library, SINGLE_LINE), lines[1].get(library)
+        result = staleness(version, others, upstream, uploaded, line, eols)
     if isinstance(result, str):
         counts[f"not compared: {result}"] += 1
         shown = f"not compared: {result}"
-        return row(name, library, version, basis, "; ".join(notes), shown, NONE, NONE)
-    extra, newest, newer, behind = result
+        return row(name, library, version, basis, "; ".join(notes), shown, *blank)
+    extra, newest, newer, behind, *on_line = result
     notes += [extra] if extra else []
     counts[f"{'current' if newer == '0' else 'behind'}: {basis}"] += 1
-    return row(name, library, version, basis, "; ".join(notes), newest, newer, behind)
+    status, line_behind = on_line[1], on_line[3]
+    counts[f"line status: {'EOL' if status.startswith('EOL') else status}"] += 1
+    counts[f"{'current' if line_behind == '0' else 'behind'} on line: {basis}"] += 1
+    return row(
+        name, library, version, basis, "; ".join(notes), newest, newer, behind, *on_line
+    )
 
 
 def _section(
@@ -157,6 +207,7 @@ def _section(
     by_prefix: Mapping[str, list[str]],
     recognized: set[tuple[str, str]],
     ambiguous: Ambiguous,
+    lines: tuple[Mapping[str, str], LineEol],
     counts: Counter[str],
 ) -> list[str]:
     out = [f"## {package.name} {package.version}", ""]
@@ -190,6 +241,7 @@ def _section(
                     upstream.get(library),
                     uploaded,
                     ambiguous,
+                    lines,
                     counts,
                 )
             )
@@ -214,11 +266,14 @@ def report(
     fingerprints: Mapping[str, Line],
     rows: Sequence[MapRow],
     ambiguous: Ambiguous,
+    line_eol: LineEol,
 ) -> str:
     """The report's text, from phases 01 to 05's lines keyed by phase and
     package name, phase 06's keyed by library, phase 08's keyed by package
-    name, the map's rows and the list of ambiguous versions."""
+    name, the map's rows, the list of ambiguous versions and the lines'
+    ends of life."""
     by_prefix = libraries_by_prefix(rows)
+    lines = ({r.library: r.line for r in rows}, line_eol)
     recognized = {(r.prefix, r.library) for r in rows if r.kind}
     counts: Counter[str] = Counter()
     sections: list[str] = []
@@ -231,6 +286,7 @@ def report(
             by_prefix,
             recognized,
             ambiguous,
+            lines,
             counts,
         )
         sections.append("")
@@ -238,6 +294,9 @@ def report(
     summary = [
         f"- Compared: current {_split(c, 'current')}; "
         f"behind {_split(c, 'behind')}. By basis.",
+        f"- On the bundled version's line: current {_split(c, 'current on line')}; "
+        f"behind {_split(c, 'behind on line')}. By basis.",
+        f"- Compared, by line status: {_split(c, 'line status')}.",
         f"- Not compared: {_split(c, 'not compared')}. By reason.",
         f"- Files whose prefix is marked skip: {c['skipped']}.",
         f"- Packages not scanned: {c['packages not scanned']}.",

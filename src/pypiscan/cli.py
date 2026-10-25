@@ -115,6 +115,12 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
         type=Path,
         help="Required. CVE table, normally data/cves.toml.",
     )
+    # Required, but checked after parsing, like --count.
+    p_scan.add_argument(
+        "--line-eol",
+        type=Path,
+        help="Required. Lines' ends of life, normally data/line_eol.csv.",
+    )
     p_scan.add_argument(
         "--episode-dir", type=Path, required=True, help="Directory for this run."
     )
@@ -130,7 +136,7 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
     )
     args = parser.parse_args(argv)
     if args.command == "scan":
-        if None in (args.count, args.ambiguous_versions, args.cve_table):
+        if None in (args.count, args.ambiguous_versions, args.cve_table, args.line_eol):
             p_scan.print_help(sys.stderr)
             return EXIT_PREFLIGHT
         if args.count < 1:
@@ -140,6 +146,7 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
             args.library_map,
             args.ambiguous_versions,
             args.cve_table,
+            args.line_eol,
             args.episode_dir,
             args.cache_dir,
             args.count,

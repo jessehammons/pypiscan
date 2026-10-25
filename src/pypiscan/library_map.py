@@ -13,7 +13,10 @@ marks a library that is identified but has no recognizer yet. A
 ``bare_version`` row's prefix maps to no other library. ``cpe`` is required
 on a mapped row: the vendor and product of each of the library's CPE names
 in NVD, joined by ``:`` and separated by single spaces, or ``none``
-(``cpe_names``). ``osv`` isn't used in version 1.
+(``cpe_names``). ``osv`` isn't used in version 1. ``line``, required on a
+mapped row, is how many leading components of a version name its line of
+releases, or ``single_line``; ``load_line_eol`` reads when each line reached
+its end of life.
 ``load_ambiguous_versions`` reads the list of ambiguous versions against the
 map's rows.
 """
@@ -22,6 +25,7 @@ import csv
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -31,6 +35,7 @@ COLUMNS = [
     "repo",
     "tags",
     "not_release",
+    "line",
     "kind",
     "pattern",
     "identity_file",
@@ -42,7 +47,9 @@ VERSION_FUNCTION = "version_function_machine_code"
 KINDS = ("library_string", "build_path", VERSION_FUNCTION, "bare_version")
 SKIP = "skip"
 # Columns every row for one library agrees on.
-SHARED = ("repo", "tags", "not_release", "cpe", "osv")
+SHARED = ("repo", "tags", "not_release", "line", "cpe", "osv")
+# The line of a library that maintains one line of releases.
+SINGLE_LINE = "single_line"
 
 PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
 # A digit followed by letters, digits, ".", "+", "~" or "-".
@@ -77,8 +84,9 @@ class MapRow:
     identity: str
     cpe: str
     osv: str
-    # Last, with a default, so rows built in code needn't name it.
+    # Last, with defaults, so rows built in code needn't name them.
     not_release: str = ""
+    line: str = SINGLE_LINE
 
 
 def _split(column: str, text: str, allowed: set[str]) -> list[str]:
@@ -264,6 +272,12 @@ def _row_problem(row: dict[str, str]) -> str | None:
         return f"{', '.join(missing)} is empty"
     if row["identity"]:
         return "identity is empty in version 1"
+    if not row["line"]:
+        return f"line is empty; use {SINGLE_LINE} for a library with one line"
+    if row["line"] != SINGLE_LINE and not (
+        NUMBER.fullmatch(row["line"]) and int(row["line"]) > 0
+    ):
+        return f"line {row['line']!r} isn't a positive integer or {SINGLE_LINE}"
     if problem := _cpe_problem(row["cpe"]):
         return problem
     try:
@@ -398,4 +412,62 @@ def load_ambiguous_versions(path: Path, rows: list[MapRow]) -> Ambiguous:
             result.setdefault(library, {}).setdefault(version, []).append(other)
             continue
         raise LibraryMapError(f"{path}:{line}: {problem}")
+    return result
+
+
+def release_line(version: str, line: str) -> str | None:
+    """The line of releases a dotted ``version`` is on, given its library's
+    ``line``: its first N components, or ``None`` for a single-line library."""
+    return None if line == SINGLE_LINE else ".".join(version.split(".")[: int(line)])
+
+
+LINE_EOL_COLUMNS = ["library", "line", "eol", "source"]
+# The eol of a line that is still maintained.
+MAINTAINED = "maintained"
+ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+# For each library, each line's eol: an ISO date or ``maintained``.
+type LineEol = dict[str, dict[str, str]]
+
+
+def _eol_problem(eol: str) -> str | None:
+    if eol == MAINTAINED:
+        return None
+    try:
+        if ISO_DATE.fullmatch(eol):
+            date.fromisoformat(eol)
+            return None
+    except ValueError:
+        pass
+    return f"eol {eol!r} isn't an ISO date or {MAINTAINED}"
+
+
+def load_line_eol(path: Path, rows: list[MapRow]) -> LineEol:
+    """Read and validate the list of lines' ends of life (README "Lines'
+    ends of life") against the loaded map's rows."""
+    lines = {row.library: row.line for row in rows if row.library != SKIP}
+    result: LineEol = {}
+    for line_num, values in _read(path, LINE_EOL_COLUMNS):
+        library, line, eol = values["library"], values["line"], values["eol"]
+        empty = [c for c in LINE_EOL_COLUMNS if not values[c]]
+        if empty:
+            problem = f"{', '.join(empty)} is empty"
+        elif library not in lines:
+            problem = f"library {library!r} isn't mapped in the library map"
+        elif lines[library] == SINGLE_LINE:
+            problem = f"library {library!r} has a single line"
+        elif not (
+            DOTTED.fullmatch(line) and line.count(".") + 1 == int(lines[library])
+        ):
+            problem = (
+                f"line {line!r} isn't {lines[library]} numbers separated by "
+                f"dots, as library {library!r}'s line column says"
+            )
+        elif eol_problem := _eol_problem(eol):
+            problem = eol_problem
+        elif line in result.get(library, {}):
+            problem = f"{library} {line} is listed twice"
+        else:
+            result.setdefault(library, {})[line] = eol
+            continue
+        raise LibraryMapError(f"{path}:{line_num}: {problem}")
     return result

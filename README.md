@@ -544,7 +544,7 @@ the map is edited, `scan` picks up at phase 06.
 
 ```
 pypiscan scan <package-list> --library-map M --ambiguous-versions A \
-  --cve-table T --episode-dir D --cache-dir C --count N
+  --cve-table T --line-eol L --episode-dir D --cache-dir C --count N
 ```
 
 - `--count` is required and takes the first N rows of the list: 1, 2, 5 or
@@ -560,6 +560,9 @@ pypiscan scan <package-list> --library-map M --ambiguous-versions A \
   [Ambiguous versions](#ambiguous-versions)).
 - `--cve-table` is required and names the committed CVE table, normally
   `data/cves.toml` (see [The CVE table](#the-cve-table)).
+- `--line-eol` is required and names the committed list of lines' ends
+  of life, normally `data/line_eol.csv` (see
+  [Lines' ends of life](#lines-ends-of-life)).
 - The episode directory holds one run's results. The cache directory holds
   downloaded wheels and upstream clones, both shared between episodes. A
   wheel is stored as `wheels/<sha256>/<filename>`: a directory named by
@@ -679,15 +682,15 @@ Part 2:
 `data/libraries.csv` is curated input, edited by hand and committed like
 the package list. One row per prefix, library and way of identifying it:
 
-| prefix | library | repo | tags | not_release | kind | pattern | identity_file | identity | cpe | osv |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `libtiff` | `libtiff` | `https://gitlab.com/libtiff/libtiff` | `v{version}` | | `library_string` | `LIBTIFF, Version {version}` | `libtiff/tiffvers.h.in` | | `libtiff:libtiff` | … |
-| `libfreetype` | `bzip2` | `https://sourceware.org/git/bzip2.git` | `bzip2-{version}` | | `library_string` | `{version}, {any}-{any}-20{any}` | `bzlib_private.h` | | `bzip:bzip2` | … |
-| `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | | `build_path` | `{any}/openjpeg-{version}/{any}` | | | `uclouvain:openjpeg` | … |
-| `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | | `bare_version` | `{version}` | `src/lib/openjp2/opj_config_private.h.cmake.in` | | `uclouvain:openjpeg` | … |
-| `libwebp` | `libwebp` | `https://chromium.googlesource.com/webm/libwebp` | `v{version}` | | `version_function_machine_code` | `WebPGetDecoderVersion -> bits *.8.8` | `src/dec/vp8_dec.c` | | `webmproject:libwebp` | … |
-| `libfreetype` | `freetype` | `https://gitlab.freedesktop.org/freetype/freetype` | `VER-{version}` | | | | | | `freetype:freetype` | |
-| `libgfortran` | `skip` | | | | | | | | | |
+| prefix | library | repo | tags | not_release | line | kind | pattern | identity_file | identity | cpe | osv |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `libtiff` | `libtiff` | `https://gitlab.com/libtiff/libtiff` | `v{version}` | | `single_line` | `library_string` | `LIBTIFF, Version {version}` | `libtiff/tiffvers.h.in` | | `libtiff:libtiff` | … |
+| `libfreetype` | `bzip2` | `https://sourceware.org/git/bzip2.git` | `bzip2-{version}` | | `single_line` | `library_string` | `{version}, {any}-{any}-20{any}` | `bzlib_private.h` | | `bzip:bzip2` | … |
+| `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | | `single_line` | `build_path` | `{any}/openjpeg-{version}/{any}` | | | `uclouvain:openjpeg` | … |
+| `libopenjp2` | `openjpeg` | `https://github.com/uclouvain/openjpeg` | `v{version}` | | `single_line` | `bare_version` | `{version}` | `src/lib/openjp2/opj_config_private.h.cmake.in` | | `uclouvain:openjpeg` | … |
+| `libwebp` | `libwebp` | `https://chromium.googlesource.com/webm/libwebp` | `v{version}` | | `single_line` | `version_function_machine_code` | `WebPGetDecoderVersion -> bits *.8.8` | `src/dec/vp8_dec.c` | | `webmproject:libwebp` | … |
+| `libfreetype` | `freetype` | `https://gitlab.freedesktop.org/freetype/freetype` | `VER-{version}` | | `single_line` | | | | | `freetype:freetype` | |
+| `libgfortran` | `skip` | | | | | | | | | | |
 
 - **prefix** is how a file is found, **library** is what it turns out to
   be, and **cpe** and **osv** are how advisories name it. The three
@@ -723,8 +726,17 @@ the package list. One row per prefix, library and way of identifying it:
   version is digits separated by dots and doesn't match **not_release**,
   so a pre-release spelled with letters, such as `lcms2.19rc1`, needs no
   rule.
+- **line** says how a library's releases form lines, such as OpenSSL's
+  3.0 and 3.5, each kept up with its own releases: a positive integer N,
+  so a version's line is its first N numbers (OpenSSL's is 2, so 3.5.8 is
+  on line 3.5, and PostgreSQL's is 1), or `single_line`, for a library
+  that maintains one line. It is required on every mapped row. It is N
+  when, by phase 06's release rule, a release on an older line of N
+  numbers is dated after the first release of a newer one, in 2021 or
+  later; otherwise `single_line`. When each line reached its end of life
+  is in [Lines' ends of life](#lines-ends-of-life).
 - Rows for one library agree on **repo**, **tags**, **not_release**,
-  **cpe** and **osv**.
+  **line**, **cpe** and **osv**.
 - **kind** is one of the version-setting kinds in
   [How versions are identified](#how-versions-are-identified), and
   **pattern** is the recognizer:
@@ -774,16 +786,38 @@ the package list. One row per prefix, library and way of identifying it:
   `.github/dependencies.json`. If the strings fit two upstreams equally
   well, stop and ask the maintainer.
 
+### Lines' ends of life
+
+`data/line_eol.csv` is curated input, edited by hand and committed like
+the library map: when each line of a library whose **line** isn't
+`single_line` reached, or will reach, its end of life, as the project
+states it. Its columns are **library**, **line**, **eol**, an ISO date
+or `maintained`, and **source**, a link to the page on the project's own
+site that states it. It has a row for every line with a release in 2021
+or later whose end of life the project states; a line it leaves out is
+never taken for a maintained one. Pre-flight loads it against the map.
+The loader rejects an empty field, a library the map doesn't track or
+whose **line** is `single_line`, a line that isn't as many numbers as
+the library's **line** says, an **eol** that is neither a date nor
+`maintained`, and a line listed twice. The staleness report reads it on
+every run, so editing it needs no phase file deleted, and it isn't an
+episode input.
+
 ### The staleness report
 
 A scanner sees `pillow 12.3.0`; the staleness report shows how old the
 C libraries inside it were. It is a measurement, not a finding: it
 names no CVE, so it isn't a CVE match (see
-[Data handling and disclosure](#data-handling-and-disclosure)).
+[Data handling and disclosure](#data-handling-and-disclosure)). It
+measures each library twice: against all its releases, and against the
+releases on its own line (see [The library map](#the-library-map)),
+since a wheel on a maintained line, such as OpenSSL 3.5, has its
+security fixes without moving to a newer one.
 
 Once phases 01, 06 and 08 are finished, every run rewrites
 `staleness-report.md` in the episode from phases 01, 05, 06 and 08, as
-it rewrites the fingerprint report. Phase files don't change, apart
+it rewrites the fingerprint report, reading the library map and
+[Lines' ends of life](#lines-ends-of-life) too. Phase files don't change, apart
 from the tag dates and release flags phase 06 records. An episode whose
 phase 06 lines predate tag dates or release flags compares no library: the report says to rerun from
 phase 06, in its counts and as each library's reason.
@@ -810,23 +844,36 @@ answer.
   one, dated on or before the upload day.
 - **Days behind**: from the earliest newer release's date to the upload
   day. A wheel with no newer releases is current, at 0 days.
+- **Line**: the bundled release's line, by the library's **line**, or
+  `all` for a `single_line` library. **Newest on line at upload** and
+  **days behind on line** follow the same rules, counting only releases
+  on that line; for a `single_line` library they repeat the values above.
+- **Line status** on the upload day: `single line`; `maintained`, when
+  the line's **eol** is `maintained` or after the upload day; `EOL` and
+  the date, when it is on or before it; or `unknown`, for a line the
+  list leaves out. A wheel current on a maintained line has the fixes
+  its line gets; one behind on it, or on a line at its end of life,
+  doesn't.
 
 For each package, each `.libs/` file and each library its prefix maps
 to, the report shows the bundled version with its basis and notes as
 the fingerprint report shows them, the newest release at upload with
-its date, the number of newer releases and the days behind. A row whose
+its date, the number of newer releases and the days behind, then the
+line, its status, the newest release on it at upload with its date and
+the days behind on it. A row whose
 basis is `bare_version` is marked as a hint, as everywhere else.
 
 Any other row is listed as not compared, never as current, with the
 reason: the fingerprint report's reason for having no version;
 the reason phase 06 failed the library;
 or no release tag for the version, such as OpenBLAS's
-`0.3.34.106.0`. A prefix marked `skip` is listed as skipped. A package
+`0.3.34.106.0`. Its line columns are `—`. A prefix marked `skip` is listed as skipped. A package
 that wasn't scanned shows the phase where it stopped and that phase's
 reason, as in the fingerprint report.
 
 The report starts with counts: libraries compared, current and behind,
-by basis, and libraries not compared, by reason, so a reader sees how
+by basis, then current and behind on their line, by basis, and by line
+status, and libraries not compared, by reason, so a reader sees how
 much of the substrate the numbers cover.
 
 Rules:
@@ -835,8 +882,9 @@ Rules:
   printed to stderr and exits 2:
   1. The episode and cache directories are outside any git working tree.
   2. The package list loads (roadmap 3.2), and so do the library map
-     (roadmap 3.7), the list of ambiguous versions (roadmap 4.7) and the
-     CVE table (roadmap 6.1).
+     (roadmap 3.7), the list of ambiguous versions (roadmap 4.7), the
+     CVE table (roadmap 6.1) and the list of lines' ends of life
+     (roadmap S.4).
   3. The episode's phase files are a run of finished phases with no gaps
      (01, 02, …) and no `.partial` file. Otherwise the error names every
      file to delete.
@@ -1148,6 +1196,19 @@ packages, to keep reviews short.
   behind 3.2.0, not 96 behind the `3.1.90` beta. The range verifier
   (6.3) reads the same flag. Manual check: rerun a one-package Pillow
   episode from phase 06.
+- **S.4** ✓ Maintained release lines, once a Later item: a new map
+  column, **line**, says how each library's releases form lines, and
+  `data/line_eol.csv` when each line reached its end of life, from the
+  project's own site. The staleness report adds each library's line,
+  its status on the upload day and its lag on that line, with counts.
+  Phase files don't change. psycopg2-binary 2.9.13's OpenSSL 3.5.8
+  still reads 343 days behind 4.0.2, but now also shows line 3.5,
+  maintained, and its lag behind the newest 3.5 release. Manual check:
+  a fresh one-package psycopg2-binary episode.
+- **S.5** `scan --stop-after NN`: stop once phase NN finishes, with the
+  reports it allows written, so a manual check that needs only phases 01
+  to 09 doesn't wait out phase 10's NVD queries, which Ctrl-C waits for
+  too, and needs no `kill -9` or `.partial` file deleted. ← current
 
 ### 0. Guardrails
 
@@ -1230,7 +1291,7 @@ file and every later one. Smoke runs use the smoke list (3.2) with a small
 uv run python -m pypiscan scan data/smoke.csv \
   --library-map data/libraries.csv \
   --ambiguous-versions data/ambiguous_versions.csv \
-  --cve-table data/cves.toml \
+  --cve-table data/cves.toml --line-eol data/line_eol.csv \
   --episode-dir ~/pypiscan/episodes/smoke-4 \
   --cache-dir ~/pypiscan/cache --count 4
 ```
@@ -1492,11 +1553,19 @@ again only rows.
   1.7.6 at its 1.7.7 and 1.8.0 tags. The hand-written zlib detector (2.1)
   becomes map rows once they pass its fixtures (2.2), including telling
   zlib from zlib-ng.
-- **Maintained branches in the staleness report.** S.1 counts a newer
-  release on any branch, so a library kept on a maintained older line,
-  such as OpenSSL 3.0, looks behind once a newer line exists, even
-  when it is current on its own line. A per-library rule for which
-  lines count would fix it; until then such rows are read by hand.
+- **Lines before a library changed its numbering.** PostgreSQL's
+  **line** is 1, which fits its versions from 10 on; before 10 a line was
+  two numbers, such as 9.6, so a 9.x release is put on line 9.
+- **Lines with no stated end of life.** krb5, OpenLDAP, xz, aom and
+  brotli keep releases on older lines, but S.4 found no end-of-life date
+  their projects state, and GEOS's site names none for 3.6 to 3.9, so
+  those lines' status is `unknown`.
+- **Tags that look like an older line's releases.** By the **line**
+  rule, libtiff and zstd would keep older lines: libtiff's v3.5.1 and
+  v3.5.2 are dated 2022, on commits of that date carrying 1999's
+  releases into the repository, and zstd's v1.4.10, dated 2022 after
+  1.5.0, is on commits preparing zstd's copy in the Linux kernel. Both
+  are `single_line`, and the staleness report still counts those dates.
 - **Time zones in days behind.** A tag's date is in the tag's own time
   zone, while the upload day is in UTC, so a staleness row's days
   behind can be off by one.

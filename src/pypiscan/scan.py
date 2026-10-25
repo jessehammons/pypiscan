@@ -31,12 +31,14 @@ from pypiscan.library_map import (
     VERSION_FUNCTION,
     Ambiguous,
     LibraryMapError,
+    LineEol,
     MapRow,
     VersionFunction,
     cpe_names,
     is_release,
     load_ambiguous_versions,
     load_library_map,
+    load_line_eol,
     matcher,
     parse_version_function,
     tag_matcher,
@@ -665,13 +667,14 @@ def preflight(
     library_map: Path,
     ambiguous_versions: Path,
     cve_table: Path,
+    line_eol: Path,
     episode: Path,
     cache: Path,
     count: int,
-) -> tuple[list[Package], list[MapRow], Ambiguous, int, list[str]]:
+) -> tuple[list[Package], list[MapRow], Ambiguous, LineEol, int, list[str]]:
     """Checks 1 to 5. Returns the packages, map rows, ambiguous versions,
-    clamped count and problems. The CVE table is only checked: nothing uses
-    it yet."""
+    lines' ends of life, clamped count and problems. The CVE table is only
+    checked: nothing uses it yet."""
     problems: list[str] = []
     for label, directory in (("episode", episode), ("cache", cache)):
         root = git_work_tree(directory)
@@ -682,21 +685,23 @@ def preflight(
             )
     rows: list[MapRow] = []
     ambiguous: Ambiguous = {}
+    eols: LineEol = {}
     try:
         rows = load_library_map(library_map)
         problems += _map_problems(episode, library_map)
         ambiguous = load_ambiguous_versions(ambiguous_versions, rows)
         load_cve_table(cve_table, rows)
+        eols = load_line_eol(line_eol, rows)
     except (LibraryMapError, CveTableError) as exc:
         problems.append(str(exc))
     try:
         packages = load_package_list(package_list)
     except PackageListError as exc:
-        return [], rows, ambiguous, 0, [*problems, str(exc)]
+        return [], rows, ambiguous, eols, 0, [*problems, str(exc)]
     count = min(count, len(packages))
     problems += _phase_file_problems(episode)
     problems += _episode_problems(episode, episode_inputs(package_list, count))
-    return packages[:count], rows, ambiguous, count, problems
+    return packages[:count], rows, ambiguous, eols, count, problems
 
 
 def _read_lines(path: Path, key: str = "name") -> dict[str, Line]:
@@ -856,6 +861,7 @@ def write_staleness_report(
     part_1: Sequence[str],
     rows: Sequence[MapRow],
     ambiguous: Ambiguous,
+    line_eol: LineEol,
 ) -> None:
     """Rewrite staleness-report.md from part 1's phases (01 to 05), 06 and
     08; ``part_1`` names part 1's phases."""
@@ -866,6 +872,7 @@ def write_staleness_report(
         _read_lines(episode / "08-fingerprint.jsonl"),
         rows,
         ambiguous,
+        line_eol,
     )
     (episode / "staleness-report.md").write_text(text, encoding="utf-8")
 
@@ -875,6 +882,7 @@ def scan(
     library_map: Path,
     ambiguous_versions: Path,
     cve_table: Path,
+    line_eol: Path,
     episode: Path,
     cache: Path,
     count: int,
@@ -885,11 +893,12 @@ def scan(
 ) -> int:
     """Pre-flight, then create the directories, record episode.json and run.
     ``sleep`` paces phase 10's requests to NVD."""
-    packages, rows, ambiguous, count, problems = preflight(
+    packages, rows, ambiguous, eols, count, problems = preflight(
         package_list,
         library_map,
         ambiguous_versions,
         cve_table,
+        line_eol,
         episode,
         cache,
         count,
@@ -940,7 +949,7 @@ def scan(
             write_fingerprint_report(
                 episode, packages, names, recognizers, rows, ambiguous
             )
-            write_staleness_report(episode, packages, names, rows, ambiguous)
+            write_staleness_report(episode, packages, names, rows, ambiguous, eols)
         if (episode / "09-sboms.jsonl").is_file():
             write_sbom_report(episode, packages, names, rows, ambiguous)
         if status:
