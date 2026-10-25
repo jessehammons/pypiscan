@@ -1205,6 +1205,10 @@ packages, to keep reviews short.
   still reads 343 days behind 4.0.2, but now also shows line 3.5,
   maintained, and its lag behind the newest 3.5 release. Manual check:
   a fresh one-package psycopg2-binary episode.
+- **S.5** `scan --stop-after NN`: stop once phase NN finishes, with the
+  reports it allows written, so a manual check that needs only phases 01
+  to 09 doesn't wait out phase 10's NVD queries, which Ctrl-C waits for
+  too, and needs no `kill -9` or `.partial` file deleted. ← current
 
 ### 0. Guardrails
 
