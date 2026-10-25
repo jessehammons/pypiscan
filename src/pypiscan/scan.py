@@ -81,6 +81,8 @@ STATUSES = ("ok", "skipped", "error")
 EXIT_PREFLIGHT = 2
 EXIT_MANUAL_STEP = 3
 EXIT_INTERRUPTED = 130
+# The values --stop-after takes: the number of each phase, 01 to 10.
+PHASE_NUMBERS = tuple(f"{n:02d}" for n in range(1, 11))
 PHASE_FILE = re.compile(r"(\d\d)-[a-z0-9-]+\.jsonl(\.partial)?")
 
 Line = dict[str, object]
@@ -795,6 +797,24 @@ def run_phases[T: Named](
     return 0
 
 
+def _through[T: Named](
+    phase_list: Sequence[Phase[T]], stop_after: str | None
+) -> list[Phase[T]]:
+    """The phases of ``phase_list`` up to phase number ``stop_after``, or all."""
+    return [p for p in phase_list if stop_after is None or p.name[:2] <= stop_after]
+
+
+def _stopped[T: Named](
+    phase_list: Sequence[Phase[T]], stop_after: str | None, err: TextIO
+) -> bool:
+    """Whether phase number ``stop_after`` is in ``phase_list``; if so, say the
+    run stops after it."""
+    names = [p.name for p in phase_list if p.name[:2] == stop_after]
+    for name in names:
+        print(f"stopped after {name}", file=err)
+    return bool(names)
+
+
 def manual_step(episode: Path, rows: Sequence[MapRow], err: TextIO) -> int:
     """Rewrite library-map-todo.csv from phase 05; stop if it has rows."""
     lines = _read_lines(episode / "05-libraries.jsonl")
@@ -890,9 +910,11 @@ def scan(
     err: TextIO,
     stop: Stop | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    stop_after: str | None = None,
 ) -> int:
     """Pre-flight, then create the directories, record episode.json and run.
-    ``sleep`` paces phase 10's requests to NVD."""
+    ``sleep`` paces phase 10's requests to NVD. ``stop_after``, a phase's
+    number, ends the run with exit 0 once that phase is finished."""
     packages, rows, ambiguous, eols, count, problems = preflight(
         package_list,
         library_map,
@@ -928,15 +950,18 @@ def scan(
     handler = signal.signal(signal.SIGINT, on_sigint)
     try:
         part_1 = phases(client, cache, episode)
-        status = run_phases(episode, packages, part_1, stop, err)
-        # The manual step comes between phases 05 and 06.
-        status = status or manual_step(episode, rows, err)
-        if status:
+        status = run_phases(episode, packages, _through(part_1, stop_after), stop, err)
+        # The manual step comes between phases 05 and 06, once 05 is finished.
+        if not status and (episode / "05-libraries.jsonl").is_file():
+            status = manual_step(episode, rows, err)
+        if status or _stopped(part_1, stop_after, err):
             return status
         part_2 = library_phases(cache, episode, _sha256(library_map), rows)
         libraries = upstream_libraries(rows)
-        status = run_phases(episode, libraries, part_2, stop, err, key="library")
-        if status:
+        status = run_phases(
+            episode, libraries, _through(part_2, stop_after), stop, err, key="library"
+        )
+        if status or _stopped(part_2, stop_after, err):
             return status
         # Phases 08 and 09 are per package again, after the per-library
         # phases: 08 runs the recognizers phase 07 recorded, and its skip
@@ -944,7 +969,9 @@ def scan(
         recognizers = _read_lines(episode / "07-recognizers.jsonl", "library")
         part_3 = [fingerprint_phase(list(recognizers.values())), sboms_phase()]
         names = [phase.name for phase in part_1]
-        status = run_phases(episode, packages, part_3, stop, err, finished=names)
+        status = run_phases(
+            episode, packages, _through(part_3, stop_after), stop, err, finished=names
+        )
         if (episode / "08-fingerprint.jsonl").is_file():
             write_fingerprint_report(
                 episode, packages, names, recognizers, rows, ambiguous
@@ -952,10 +979,13 @@ def scan(
             write_staleness_report(episode, packages, names, rows, ambiguous, eols)
         if (episode / "09-sboms.jsonl").is_file():
             write_sbom_report(episode, packages, names, rows, ambiguous)
-        if status:
+        if status or _stopped(part_3, stop_after, err):
             return status
         # Phase 10 is per library again, and reads no earlier phase.
         part_4 = [cves_phase(client, sleep)]
-        return run_phases(episode, libraries, part_4, stop, err, key="library")
+        status = run_phases(episode, libraries, part_4, stop, err, key="library")
+        if not status:
+            _stopped(part_4, stop_after, err)
+        return status
     finally:
         signal.signal(signal.SIGINT, handler)

@@ -544,7 +544,8 @@ the map is edited, `scan` picks up at phase 06.
 
 ```
 pypiscan scan <package-list> --library-map M --ambiguous-versions A \
-  --cve-table T --line-eol L --episode-dir D --cache-dir C --count N
+  --cve-table T --line-eol L --episode-dir D --cache-dir C --count N \
+  [--stop-after NN]
 ```
 
 - `--count` is required and takes the first N rows of the list: 1, 2, 5 or
@@ -563,6 +564,14 @@ pypiscan scan <package-list> --library-map M --ambiguous-versions A \
 - `--line-eol` is required and names the committed list of lines' ends
   of life, normally `data/line_eol.csv` (see
   [Lines' ends of life](#lines-ends-of-life)).
+- `--stop-after` is optional and takes a phase's two-digit number, 01 to
+  10; any other value exits 2. `scan` runs through phase NN, skipping
+  finished phases, writes the reports the finished phases allow, prints
+  `stopped after NN-<phase>` to stderr after the counts and exits 0, so a
+  manual check needn't wait out phase 10. If phase NN is already
+  finished, no phase runs and the reports are rewritten. The manual step
+  still stops a run before NN with exit 3. It isn't recorded in
+  `episode.json`, so a later run without it carries on from phase NN+1.
 - The episode directory holds one run's results. The cache directory holds
   downloaded wheels and upstream clones, both shared between episodes. A
   wheel is stored as `wheels/<sha256>/<filename>`: a directory named by
@@ -1205,10 +1214,9 @@ packages, to keep reviews short.
   still reads 343 days behind 4.0.2, but now also shows line 3.5,
   maintained, and its lag behind the newest 3.5 release. Manual check:
   a fresh one-package psycopg2-binary episode.
-- **S.5** `scan --stop-after NN`: stop once phase NN finishes, with the
-  reports it allows written, so a manual check that needs only phases 01
-  to 09 doesn't wait out phase 10's NVD queries, which Ctrl-C waits for
-  too, and needs no `kill -9` or `.partial` file deleted. ← current
+- **S.5** ✓ `scan --stop-after NN`: stop once phase NN finishes, with
+  the reports it allows written, so a manual check that needs only phases
+  01 to 09 doesn't wait out phase 10's NVD queries.
 
 ### 0. Guardrails
 
