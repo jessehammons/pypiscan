@@ -18,6 +18,7 @@ from pypiscan.fingerprint import linkage_of
 from pypiscan.fingerprint_report import (
     FINGERPRINT,
     NONE,
+    NOT_IN_MAP,
     Line,
     cells,
     libraries_by_prefix,
@@ -143,7 +144,7 @@ def compare(
     if len(components) > 1:
         return NOT, "several components"
     if not libraries:
-        return NOT, "not mapped"
+        return NOT, NOT_IN_MAP
     if len(libraries) > 1:
         return NOT, "several libraries"
     [library], [component] = libraries, components
@@ -236,7 +237,7 @@ def _section(
             shown = (
                 cells(library, record, (prefix, library) in recognized, ambiguous)
                 if libraries
-                else (NONE, NONE, "not mapped")
+                else (NONE, NONE, NOT_IN_MAP)
             )
             name, component, comparison = first if i == 0 else ("", "", "")
             out.append(row(name, component, library, *shown, comparison))

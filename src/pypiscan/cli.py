@@ -140,6 +140,12 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
         metavar="NN",
         help="Stop once phase NN (01 to 11) is finished, with exit 0.",
     )
+    p_scan.add_argument(
+        "--skip-map-todo",
+        action="store_true",
+        help="List the prefixes the library map doesn't, but go on to phase 06 "
+        "rather than stopping for the manual step.",
+    )
     args = parser.parse_args(argv)
     if args.command == "scan":
         if None in (args.count, args.ambiguous_versions, args.cve_table, args.line_eol):
@@ -159,6 +165,7 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
             client or UrllibClient(),
             sys.stderr,
             stop_after=args.stop_after,
+            skip_map_todo=args.skip_map_todo,
         )
     if args.command == "fetch":
         return fetch(args.release, args.cache_dir, client or UrllibClient())

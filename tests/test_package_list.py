@@ -28,7 +28,7 @@ def test_loads_rows_in_order(tmp_path: Path) -> None:
 
 def test_accepts_max_packages(tmp_path: Path) -> None:
     rows = "".join(f"pkg{i},1.0\n" for i in range(MAX_PACKAGES))
-    assert len(load_package_list(write(tmp_path, "name,version\n" + rows))) == 100
+    assert len(load_package_list(write(tmp_path, "name,version\n" + rows))) == 500
 
 
 @pytest.mark.parametrize(
@@ -57,7 +57,7 @@ def test_accepts_max_packages(tmp_path: Path) -> None:
         (
             "name,version\n"
             + "".join(f"pkg{i},1.0\n" for i in range(MAX_PACKAGES + 1)),
-            "more than 100 packages",
+            "more than 500 packages",
         ),
         ('name,version\n"lxml,6.1.3\n', ":2: expected a name and a version"),
         ("name,version\nlxml," + "1" * 200_000 + "\n", "field larger than"),

@@ -20,6 +20,7 @@ from pypiscan.fingerprint import LINKAGES, Linkage, linkage_of
 from pypiscan.fingerprint_report import (
     FINGERPRINT,
     NONE,
+    NOT_IN_MAP,
     Line,
     cells,
     libraries_by_prefix,
@@ -287,6 +288,11 @@ def _section(
     for found in files:
         name = PurePosixPath(found["path"]).name
         prefix = found["prefix"]
+        if prefix not in by_prefix:
+            counts["shared_lib"][f"not compared: {NOT_IN_MAP}"] += 1
+            shown = f"not compared: {NOT_IN_MAP}"
+            blank = [NONE] * 6
+            shared.append(row(name, "shared_lib", NONE, NONE, NONE, "", shown, *blank))
         for library in by_prefix.get(prefix, []):
             shared.append(
                 _row(

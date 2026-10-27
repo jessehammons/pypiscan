@@ -1006,8 +1006,11 @@ def _stopped[T: Named](
     return bool(names)
 
 
-def manual_step(episode: Path, rows: Sequence[MapRow], err: TextIO) -> int:
-    """Rewrite library-map-todo.csv from phase 05; stop if it has rows."""
+def manual_step(
+    episode: Path, rows: Sequence[MapRow], err: TextIO, skip_map_todo: bool = False
+) -> int:
+    """Rewrite library-map-todo.csv from phase 05; stop if it has rows, unless
+    ``skip_map_todo``."""
     lines = _read_lines(episode / "05-libraries.jsonl")
     names = list(lines)
     found = {name: {"05-libraries": line} for name, line in lines.items()}
@@ -1022,6 +1025,9 @@ def manual_step(episode: Path, rows: Sequence[MapRow], err: TextIO) -> int:
     )
     for prefix in missing:
         print(f"  {prefix}", file=err)
+    if skip_map_todo:
+        print("going on with --skip-map-todo", file=err)
+        return 0
     return EXIT_MANUAL_STEP
 
 
@@ -1125,10 +1131,12 @@ def scan(
     stop: Stop | None = None,
     sleep: Callable[[float], None] = time.sleep,
     stop_after: str | None = None,
+    skip_map_todo: bool = False,
 ) -> int:
     """Pre-flight, then create the directories, record episode.json and run.
     ``sleep`` paces phase 11's requests to NVD. ``stop_after``, a phase's
-    number, ends the run with exit 0 once that phase is finished."""
+    number, ends the run with exit 0 once that phase is finished.
+    ``skip_map_todo`` keeps the manual step from stopping the run."""
     packages, rows, ambiguous, eols, count, problems = preflight(
         package_list,
         library_map,
@@ -1167,7 +1175,7 @@ def scan(
         status = run_phases(episode, packages, _through(part_1, stop_after), stop, err)
         # The manual step comes between phases 05 and 06, once 05 is finished.
         if not status and (episode / "05-libraries.jsonl").is_file():
-            status = manual_step(episode, rows, err)
+            status = manual_step(episode, rows, err, skip_map_todo)
         if status or _stopped(part_1, stop_after, err):
             return status
         part_2 = library_phases(cache, episode, _sha256(library_map), rows)

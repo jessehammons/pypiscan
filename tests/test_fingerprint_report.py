@@ -300,3 +300,29 @@ def test_an_unknown_linkage_fails() -> None:
     phase_08 = {**PHASE_08, "a": {**a, "records": [bad]}}
     with pytest.raises(ValueError, match="unknown linkage 'executable'"):
         report(PACKAGES, PHASES_01_TO_05, PHASE_07, phase_08, ROWS, {})
+
+
+def test_a_file_whose_prefix_isnt_in_the_map() -> None:
+    files = [
+        {"path": path("liba"), "prefix": "liba"},
+        {"path": path("libnew"), "prefix": "libnew"},
+        {"path": "a.libs/libnew-5e6f7a8b.so.2", "prefix": "libnew"},
+        {"path": path("libother"), "prefix": "libother"},
+    ]
+    part_1 = by_phase({"a": ok_until_05("a", files)})
+    text = report([Package("a", "1.0")], part_1, PHASE_07, PHASE_08, ROWS, {})
+    count = (
+        "3 .libs/ files under 2 prefixes aren't in the library map; "
+        "see library-map-todo.csv.\n"
+    )
+    assert text.startswith(f"{INTRO}\n{count}\n## a 1.0\n")
+    assert "| libnew-1a2b3c4d.so.1 | — | — | — | not in map |\n" in text
+    assert "| libnew-5e6f7a8b.so.2 | — | — | — | not in map |\n" in text
+    assert "| libother-1a2b3c4d.so.1 | — | — | — | not in map |\n" in text
+    assert "| liba-1a2b3c4d.so.1 | alpha | 1.2.3 | library_string |  |\n" in text
+
+
+def test_no_count_line_when_every_prefix_is_in_the_map() -> None:
+    text = report(PACKAGES, PHASES_01_TO_05, PHASE_07, PHASE_08, ROWS, {})
+    assert "aren't in the library map" not in text
+    assert text == EXPECTED

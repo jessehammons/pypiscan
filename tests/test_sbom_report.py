@@ -185,7 +185,7 @@ AMBIGUOUS = {"lcms2": {"2.19.0": ["2.19.1"]}}
         (["sasl"], fingerprint("2.1.26.0"), True, "differs"),
         (["lcms2"], fingerprint("2.19.0"), True, "differs"),
         (["sasl", "other"], fingerprint("2.1.26"), True, "several libraries"),
-        ([], None, False, "not mapped"),
+        ([], None, False, "not in map"),
         (["skip"], None, False, "not tracked"),
         (["sasl"], None, False, "no recognizer"),
         (["sasl"], None, True, "not detected"),
@@ -584,7 +584,7 @@ def test_two_components_on_one_file_are_shown_and_counted() -> None:
     ) in text
 
 
-def test_an_unmapped_prefix_is_shown_as_not_mapped() -> None:
+def test_an_unmapped_prefix_is_shown_as_not_in_map() -> None:
     files = libs("a", "libz-12345678.so.1")
     libz = component("zlib", "1.2.7-21", rpm("zlib", "1.2.7-21"), "/lib64/libz.so.1")
     text = report(
@@ -595,7 +595,7 @@ def test_an_unmapped_prefix_is_shown_as_not_mapped() -> None:
         [],
         {},
     )
-    assert "| — | — | — | not mapped | not compared: not mapped |" in text
+    assert "| — | — | — | not in map | not compared: not in map |" in text
 
 
 def test_phase_09s_own_error_names_phase_09() -> None:
