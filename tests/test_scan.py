@@ -790,7 +790,9 @@ def stub_phases(client: object, cache_dir: Path, episode: Path) -> list[Phase]:
         )
         sha256 = hashlib.sha256(wheel.read_bytes()).hexdigest()
         uploaded = "2026-01-01T23:30:00-02:00"
-        return Result("ok", None, {"sha256": sha256, "upload_time": uploaded})
+        filename = f"{package.name}-1.0-cp312-cp312-manylinux_2_28_x86_64.whl"
+        data: Line = {"sha256": sha256, "upload_time": uploaded, "filename": filename}
+        return Result("ok", None, data)
 
     def fetch(package: Package, earlier: Mapping[str, Line]) -> Result:
         return Result("ok", None, {"path": str(cache_dir / f"{package.name}.whl")})
@@ -1695,7 +1697,9 @@ def test_sbom_report_is_rewritten_once_phase_09_is_finished(
     assert run(dirs, "--count", "3") == EXIT_INTERRUPTED
     fingerprints = (dirs.episode / "fingerprint-report.md").read_bytes()
     report = dirs.episode / "sbom-report.md"
+    atlas = dirs.episode / "atlas.md"
     assert not report.exists()
+    assert not atlas.exists()
 
     # Once phase 09 finishes, the SBOM report is written, and the
     # fingerprint report doesn't change.
@@ -1704,6 +1708,13 @@ def test_sbom_report_is_rewritten_once_phase_09_is_finished(
     assert run(dirs, "--count", "3") == 0
     assert (dirs.episode / "fingerprint-report.md").read_bytes() == fingerprints
     text = report.read_text()
+    rows = atlas.read_text()
+    assert (
+        "| demo | 1.0 | manylinux_2_28_x86_64 | auditwheel | AlmaLinux 8 "
+        "| `libgfortran` (skip); libpng [AlmaLinux 8] |\n"
+    ) in rows
+    assert "| puredemo | 3.1 | manylinux_2_28_x86_64 | none | — | libpng |\n" in rows
+    assert "- missing 9.9: error at 01-resolve: HTTP 404\n" in rows
     assert "- Tied files that agree: 1 (library_string 1).\n" in text
     assert (
         f"| libpng16-1a2b3c4d.so.16.58.0 | libpng 1.6.58-1.el8 ({PNG_PURL}) | libpng "
@@ -1714,8 +1725,10 @@ def test_sbom_report_is_rewritten_once_phase_09_is_finished(
 
     # A run where every phase was already finished rewrites it.
     report.write_text("stale")
+    atlas.write_text("stale")
     assert run(dirs, "--count", "3") == 0
     assert report.read_text() == text
+    assert atlas.read_text() == rows
     report.unlink()
     assert run(dirs, "--count", "3") == 0
     assert report.read_text() == text
@@ -1919,6 +1932,7 @@ def test_stop_after_writes_the_reports_finished_phases_allow(
     assert (dirs.episode / "fingerprint-report.md").is_file()
     assert (dirs.episode / "staleness-report.md").is_file()
     assert not (dirs.episode / "sbom-report.md").exists()
+    assert not (dirs.episode / "atlas.md").exists()
     assert not list(dirs.episode.glob("09-*")) + list(dirs.episode.glob("10-*"))
     assert not list(dirs.episode.glob("*.partial"))
 
@@ -1946,6 +1960,7 @@ def test_stop_after_writes_the_reports_finished_phases_allow(
         "10-static: 1 ok, 1 skipped, 1 error\nstopped after 10-static\n"
     )
     assert (dirs.episode / "sbom-report.md").is_file()
+    assert (dirs.episode / "atlas.md").is_file()
     assert (dirs.episode / "static-report.md").is_file()
     assert not list(dirs.episode.glob("11-*"))
     assert run(dirs, "--count", "3", "--stop-after", "11") == 0

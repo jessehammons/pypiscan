@@ -541,6 +541,77 @@ Then, for each package with an SBOM or a `.libs/` file:
 A package that wasn't scanned in phase 09 shows the phase where it
 stopped and that phase's reason, as in the fingerprint report.
 
+### The bundled-library atlas
+
+Once phase 09 is finished, every run rewrites `atlas.md` in the episode
+from phases 01 to 05 and 09 and the library map, as it rewrites the SBOM
+report; phases 03 and 04 only show where a package stopped. Records and
+other reports don't change. The atlas is meant to be read outside the
+project, so its top says what it covers:
+
+- It lists only shared libraries in a wheel's `.libs/` directory.
+  Libraries compiled into extension modules or other libraries, such as
+  cryptography's OpenSSL or lxml's zlib, aren't in it (see
+  [Findings so far](#findings-so-far)).
+- It names what wheels carry, not versions: versions and their basis are
+  in `fingerprint-report.md`, and SBOM claims in `sbom-report.md`.
+- A build image is shown only where an auditwheel component is tied to
+  the file. No image doesn't mean an upstream build.
+
+Then counts:
+
+- packages in the episode, wheels opened in phase 05, and packages
+  skipped, by phase and reason;
+- wheels with a `.libs/` directory (the rows) and their `.libs/` files;
+- libraries by the map's name, and prefixes not in the map with their
+  files;
+- rows by platform tag;
+- rows with an SBOM, by kind, and scanned wheels with an SBOM but no
+  `.libs/`, by kind (they are in `sbom-report.md`, not here); a wheel
+  with several kinds counts under each, so the kinds can sum to more
+  than the wheels;
+- rows with a file tied to an auditwheel component, and tied files by
+  build image.
+
+Then a table, one row per wheel with a `.libs/` file, by package name:
+package, version, platform tag, SBOM, build image, libraries.
+
+- **platform tag** is the wheel filename's platform tag verbatim, such as
+  `manylinux_2_17_x86_64.manylinux2014_x86_64`.
+- **SBOM** is each SBOM file's kind, distinct kinds joined with `, `: for
+  a CycloneDX file without an error, its tools' names joined with `+`
+  (`auditwheel`, `cargo-cyclonedx`, or the name a project's file gives),
+  or `cyclonedx-json, no tools`; otherwise its format (`spdx-json`,
+  `other`) or `error: <error>`. A wheel with no SBOM shows `none`; a
+  package whose phase 09 line is an error shows
+  `error at 09-sboms: <reason>`.
+- **build image** is each distinct image of the wheel's tied components,
+  or `—`.
+- **libraries**: a prefix the map ties to one library appears under that
+  library's name, once per wheel however many prefixes and files it has,
+  so OpenBLAS's five prefixes are one library. Any other prefix appears
+  as itself, in code font, with a label: `` `libfoo` (not in map) ``,
+  `` `libgfortran` (skip) `` for a map row whose library is `skip`, and
+  `` `libfreetype` (freetype, bzip2) `` for a prefix the map ties to
+  several libraries. Names are plain text and prefixes always in code
+  font, so a prefix is never read as a library pypiscan identified. Each
+  entry shows in brackets the distinct images of its tied files, such as
+  `krb5 [CentOS 7]`. Entries are sorted.
+
+A tied component's build image comes from its purl only. The
+distribution is the purl's namespace, displayed as CentOS, AlmaLinux,
+Rocky Linux, RHEL, Debian, Ubuntu or Alpine for `centos`, `almalinux`,
+`rocky`, `rhel`, `debian`, `ubuntu` or `alpine`, any other namespace
+verbatim, and `unknown` with none. The release is known only for
+`pkg:rpm` whose version's last `-` part contains `.el` and digits: those
+digits, so `1.15.1-55.el7_9` is 7 and the image is `CentOS 7`. Any other
+purl shows `<distribution>, release unknown`. A wheel whose components
+name different images lists each; none is picked.
+
+Below the table, every package without a row that wasn't opened, with
+the phase where it stopped and that phase's reason, as the fingerprint
+report shows it, such as `skipped at 02-fetch: too_large`.
+
 ## How a scan runs
 
 `scan` runs every package on a committed list through a fixed sequence of
@@ -708,7 +779,9 @@ Part 2:
    cache. A wheel with no SBOM gets an `ok` line with no records.
    Once phase 09 is finished, every run rewrites `sbom-report.md` in the
    episode (see
-   [Comparing SBOMs with fingerprints](#comparing-sboms-with-fingerprints)).
+   [Comparing SBOMs with fingerprints](#comparing-sboms-with-fingerprints)),
+   and `atlas.md` (see
+   [The bundled-library atlas](#the-bundled-library-atlas)).
 10. `10-static` (per package): unconfirmed candidates for statically
     linked libraries in the wheel's binaries outside `.libs/`, and
     `fingerprint` records with linkage `static_lib` from those whose map
@@ -1450,20 +1523,15 @@ and a few small deliverables other people can use.
   lists the 22 SBOM wheels, and in both psycopg wheels krb5 and cyrus-sasl
   still agree. Rerun `stale100` with `--stop-after 09`; its reports don't
   change except for that rename.
-- **C.3** The bundled-library atlas, `atlas.md`, rewritten every run from
-  phases 01, 02, 05 and 09 (08 where it ran): one row per wheel with a
-  `.libs/` directory, its manylinux tag, its libraries grouped by the map's
-  library name (so OpenBLAS's five prefixes are one library), whether it
-  ships an SBOM and of which kind, and the build image's distribution and
-  release where an auditwheel component is tied to the file. Skipped wheels
-  are listed with their reason. It lists only shared libraries in `.libs/`,
-  and says so at its top: libraries compiled into extension modules, such
-  as cryptography's OpenSSL or lxml's zlib, aren't in it (see [Findings so
-  far](#findings-so-far)). Manual check: `top500-p1` gives 48 rows, 22 with
-  an SBOM, and psycopg2-binary's krb5 shows CentOS 7. ← current
+- **C.3** ✓ The bundled-library atlas, `atlas.md` (see
+  [The bundled-library atlas](#the-bundled-library-atlas)). Manual check:
+  rerun `top500-p1` with `--skip-map-todo --stop-after 09`; `atlas.md` has
+  48 rows, 22 with an SBOM, and psycopg2-binary's krb5 shows CentOS 7, and
+  the other reports don't change. Rerun `stale100` with `--stop-after 09`;
+  only `atlas.md` is new.
 - **C.4** A tagged release of the top-500 probe, as a manual case of 8.1:
   the atlas, `library-report.md`, `sbom-report.md`, a short summary and
-  `SHA256SUMS`. No code.
+  `SHA256SUMS`. No code. ← current
 - **C.5** The large wheels, measured first as T.1 was. A small episode of
   the eight wheels the top-500 probe skipped as `too_large` that aren't
   NVIDIA's own CUDA libraries or model data: torch, tensorflow, vllm,
@@ -2173,6 +2241,21 @@ again only rows.
 - **Repo URLs aren't checked for https.** The loader accepts any
   **repo**, so an ssh URL could hang phase 06 on a host-key or
   passphrase prompt.
+
+- **Wheels with an SBOM but no `.libs/` in the atlas.** The atlas counts
+  them by SBOM kind and leaves them to `sbom-report.md`; a row for each
+  would show what Rust extensions and projects claim beside what
+  auditwheel copied.
+
+- **Build images from more of a purl.** The atlas reads a release only
+  from an `.elN` in an rpm version. A purl qualifier, such as a
+  `distro` one, or a deb or apk version could name the release of other
+  images.
+
+- **Multi-library prefixes in the atlas.** A prefix the map ties to
+  several libraries is shown as the prefix with its libraries listed.
+  Phase 08's records for the wheel could say which of them the file
+  holds.
 
 ## Data handling and disclosure
 
