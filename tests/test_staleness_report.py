@@ -590,3 +590,24 @@ def test_an_unknown_linkage_fails(phase: str) -> None:
         phase_10["pkg"] = static_line(("a/x.so", [bad]))
     with pytest.raises(ValueError, match="unknown linkage 'executable'"):
         report(PACKAGES, PART_1, PHASE_06, phase_08, phase_10, ROWS, {}, {})
+
+
+def test_a_file_whose_prefix_isnt_in_the_map_is_not_compared() -> None:
+    libraries = [{"path": path(p), "prefix": p} for p in [*PREFIXES, "libnew"]]
+    part_1 = {
+        **PART_1,
+        "05-libraries": {
+            **PART_1["05-libraries"],
+            "pkg": {"status": "ok", "libraries": libraries},
+        },
+    }
+    out = report(PACKAGES, part_1, PHASE_06, PHASE_08, None, ROWS, AMBIGUOUS, {})
+    assert (
+        "| libnew-1a2b3c4d.so.1 | shared_lib | — | — | — |  | "
+        "not compared: not in map | — | — | — | — | — | — |\n"
+    ) in out
+    shared = out.split("### shared_lib")[1].split("## pkg")[0]
+    assert (
+        "- Not compared: 6 (no recognizer 1, no release tag for the version 1, "
+        "not detected 1, not in map 1, not_github 1, phase 06 error 1). By reason."
+    ) in shared

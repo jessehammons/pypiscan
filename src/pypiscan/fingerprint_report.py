@@ -23,6 +23,7 @@ investigating, not a conclusion. Its basis says which signal it rests on;
 see "How versions are identified" in the README.
 """
 NONE = "—"
+NOT_IN_MAP = "not in map"
 FINGERPRINT = "08-fingerprint"
 HEADER = "| file | library | version | basis | note |\n|---|---|---|---|---|"
 
@@ -144,6 +145,8 @@ def _section(
     out.append(HEADER)
     for found in files:
         name = PurePosixPath(found["path"]).name
+        if found["prefix"] not in by_prefix:
+            out.append(row(name, NONE, NONE, NONE, NOT_IN_MAP))
         for library in by_prefix.get(found["prefix"], []):
             record = records.get((found["path"], library))
             recognized = _has_recognizers(recognizers.get(library), found["prefix"])
@@ -151,6 +154,29 @@ def _section(
                 row(name, library, *cells(library, record, recognized, ambiguous))
             )
     return out
+
+
+def unmapped(
+    packages: Sequence[Package],
+    part_1: Mapping[str, Mapping[str, Line]],
+    by_prefix: Mapping[str, list[str]],
+) -> str:
+    """The line counting phase 05's `.libs/` files whose prefix the map
+    doesn't list, or ``""`` when there are none."""
+    files = 0
+    prefixes: set[str] = set()
+    for package in packages:
+        line = part_1.get("05-libraries", {}).get(package.name) or {}
+        for found in cast(list[Mapping[str, str]], line.get("libraries") or []):
+            if found["prefix"] not in by_prefix:
+                files += 1
+                prefixes.add(found["prefix"])
+    if not files:
+        return ""
+    return (
+        f"{files} .libs/ files under {len(prefixes)} prefixes aren't in the "
+        "library map; see library-map-todo.csv.\n"
+    )
 
 
 def report(
@@ -166,6 +192,8 @@ def report(
     library, the map's rows and the list of ambiguous versions."""
     by_prefix = libraries_by_prefix(rows)
     out = [INTRO]
+    if count := unmapped(packages, part_1, by_prefix):
+        out.append(count)
     for package in packages:
         out += _section(
             package,

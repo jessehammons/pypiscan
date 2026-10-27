@@ -511,9 +511,9 @@ version equals the fingerprint version, or a release that version may
 be (see [Ambiguous versions](#ambiguous-versions)), and differ
 otherwise; a difference is checked by hand. Any other tied file isn't
 compared, and the report says why: two components are tied to it, its
-prefix maps to several libraries, so the package's version could be
-set against the wrong one, or the fingerprint report's reason for
-having no version.
+prefix isn't in the map (`not in map`), its prefix maps to several
+libraries, so the package's version could be set against the wrong one,
+or the fingerprint report's reason for having no version.
 
 Agreement is two signals saying the same thing, not proof. When the
 fingerprint version is a bare version, it is the kind of second source
@@ -565,7 +565,7 @@ the map is edited, `scan` picks up at phase 06.
 ```
 pypiscan scan <package-list> --library-map M --ambiguous-versions A \
   --cve-table T --line-eol L --episode-dir D --cache-dir C --count N \
-  [--stop-after NN]
+  [--stop-after NN] [--skip-map-todo]
 ```
 
 - `--count` is required and takes the first N rows of the list: 1, 2, 5 or
@@ -592,6 +592,14 @@ pypiscan scan <package-list> --library-map M --ambiguous-versions A \
   finished, no phase runs and the reports are rewritten. The manual step
   still stops a run before NN with exit 3. It isn't recorded in
   `episode.json`, so a later run without it carries on from phase NN+1.
+- `--skip-map-todo` is optional. The manual step still rewrites
+  `library-map-todo.csv` and lists its prefixes, but doesn't stop the run,
+  so part 2 runs on the prefixes the map lists, and a `.libs/` file whose
+  prefix it doesn't list shows as `not in map` in the reports. Like
+  `--stop-after`, it isn't recorded in `episode.json`, so a later run
+  without it stops at the manual step again, before any report is
+  rewritten. Adding rows to the map afterwards means deleting phase 06's
+  file and every later one (pre-flight check 5).
 - The episode directory holds one run's results. The cache directory holds
   downloaded wheels and upstream clones, both shared between episodes. A
   wheel is stored as `wheels/<sha256>/<filename>`: a directory named by
@@ -642,8 +650,8 @@ rewrites `library-map-todo.csv` in the episode, one row per prefix the map
 doesn't list, in the map's columns with only `prefix` filled in. It is
 derived from the map, not a phase file, so it is never skipped as
 finished. If it has rows, `scan` lists the prefixes on stderr and
-exits 3. The maintainer reads the report and, for each prefix, adds rows to
-the library map (or marks the prefix `skip`), commits the map, and reruns
+exits 3, unless `--skip-map-todo` is given. The maintainer reads the
+report and, for each prefix, adds rows to the library map (or marks the prefix `skip`), commits the map, and reruns
 `scan`, which goes on to phase 06 once the todo is empty.
 
 Part 2:
@@ -686,7 +694,10 @@ Part 2:
    in the episode from phases 05, 07 and 08, as it rewrites
    `library-map-todo.csv`: for each package, every `.libs/` file and each
    library its prefix maps to, with the version and its basis, marking an
-   ambiguous version, or why there is none (roadmap 4.5).
+   ambiguous version, or why there is none (roadmap 4.5). A file whose
+   prefix isn't in the map gets one row, with `—` for the library and the
+   reason `not in map`, and the report's first lines count such files and
+   their prefixes.
    A package that wasn't scanned shows the phase where it stopped and
    that phase's reason, such as `skipped at 02-fetch: too_large`.
 9. `09-sboms` (per package): `sbom` records for the wheel (see
@@ -939,7 +950,9 @@ as `matches disagree` for a record whose matches give different
 versions, as playwright's two copies of zlib in `driver/node` do;
 the reason phase 06 failed the library;
 or no release tag for the version, such as OpenBLAS's
-`0.3.34.106.0` and grpcio's zlib `1.3.1.1`. Its line columns are `—`. A prefix marked `skip` is listed as skipped. A package
+`0.3.34.106.0` and grpcio's zlib `1.3.1.1`. Its line columns are `—`. A
+prefix marked `skip` is listed as skipped. A file whose prefix isn't in
+the map is listed as not compared, `not in map`. A package
 that wasn't scanned shows the phase where it stopped and that phase's
 reason, as in the fingerprint report.
 
@@ -1425,14 +1438,18 @@ current direction on a checkpoint: what was found, a pause on CVE matching,
 and a few small deliverables other people can use.
 
 - **C.1** ✓ The [Findings so far](#findings-so-far) section, docs only.
-- **C.2** (required for the bundled-library atlas, C.3) `scan
-  --skip-map-todo`: the manual step writes `library-map-todo.csv` and lists
-  the prefixes but doesn't stop, so `--stop-after 09` reaches phase 09 with
-  unmapped prefixes. Unmapped `.libs/` files show as not in the map in the
-  fingerprint and SBOM reports, never as missing. Manual check: rerun
+- **C.2** ✓ (required for the bundled-library atlas, C.3, and for C.5)
+  `scan --skip-map-todo`: the manual step still writes `library-map-todo.csv` and
+  lists the prefixes, but the run goes on to phase 06, so `--stop-after 09`
+  reaches phase 09 with unmapped prefixes. A `.libs/` file whose prefix
+  isn't in the map shows as `not in map` in the fingerprint, SBOM and
+  staleness reports, never as missing, and the reports count such files.
+  The package list loader's cap goes from 100 rows to 500 (the first half
+  of T.4), so the top-500 probe reruns from main. Manual check: rerun
   `top500-p1` with `--skip-map-todo --stop-after 09`; `sbom-report.md`
   lists the 22 SBOM wheels, and in both psycopg wheels krb5 and cyrus-sasl
-  still agree. ← current
+  still agree. Rerun `stale100` with `--stop-after 09`; its reports don't
+  change except for that rename.
 - **C.3** The bundled-library atlas, `atlas.md`, rewritten every run from
   phases 01, 02, 05 and 09 (08 where it ran): one row per wheel with a
   `.libs/` directory, its manylinux tag, its libraries grouped by the map's
@@ -1443,7 +1460,7 @@ and a few small deliverables other people can use.
   and says so at its top: libraries compiled into extension modules, such
   as cryptography's OpenSSL or lxml's zlib, aren't in it (see [Findings so
   far](#findings-so-far)). Manual check: `top500-p1` gives 48 rows, 22 with
-  an SBOM, and psycopg2-binary's krb5 shows CentOS 7.
+  an SBOM, and psycopg2-binary's krb5 shows CentOS 7. ← current
 - **C.4** A tagged release of the top-500 probe, as a manual case of 8.1:
   the atlas, `library-report.md`, `sbom-report.md`, a short summary and
   `SHA256SUMS`. No code.
@@ -1558,7 +1575,8 @@ written for it.
 - **T.4** The top 500: the package list loader's 100-row cap (roadmap 3.2)
   is lifted, `scripts/top_packages.py` stops at 500, and a full run scans
   them. *(Paused at the [checkpoint](#mini-roadmap-checkpoint): the top-500
-  probe ran part 1 with a local override of the cap.)*
+  probe ran part 1 with a local override of the cap. C.2 lifted the cap
+  to 500.)*
 
 ### Mini-roadmap: staleness of bundled libraries
 
@@ -1709,8 +1727,8 @@ uv run python -m pypiscan scan data/smoke.csv \
   chosen file matches what `uvx pip download` picks with the flags in
   [Conventions](#conventions).
 - **3.2** ✓ The package list format and loader, and the smoke list. A package
-  list is a CSV file with columns `name` and `version`, at most 100 rows, in
-  processing order. The loader rejects an empty list, more than 100 rows,
+  list is a CSV file with columns `name` and `version`, at most 500 rows
+  (100 until C.2), in processing order. The loader rejects an empty list, more than 500 rows,
   missing fields, and names that collide after PEP 503 normalization
   (`Pillow` and `pillow` are the same package). The smoke list,
   `data/smoke.csv`, is hand-picked, at most 10 rows, ordered so that small

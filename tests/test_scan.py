@@ -1951,3 +1951,31 @@ def test_stop_after_writes_the_reports_finished_phases_allow(
     assert run(dirs, "--count", "3", "--stop-after", "11") == 0
     err = capsys.readouterr().err
     assert err.endswith("11-cves: 0 ok, 1 skipped, 0 error\nstopped after 11-cves\n")
+
+
+def test_skip_map_todo_goes_on_to_part_2(
+    dirs: Dirs, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(scan_module, "phases", stub_phases)
+    header = ",".join(COLUMNS)
+    repo = make_repo(dirs.episode.parent / "libpng", {"v1.6.58": {}})
+    png = f"libpng16,libpng,{repo},v{{version}},,single_line,library_string,"
+    png += "libpng version {version},p.c,,,none,"
+    dirs.map.write_text(f"{header}\n{png}\n")
+    flags = ("--count", "3", "--stop-after", "06")
+    assert run(dirs, *flags, "--skip-map-todo") == 0
+    err = capsys.readouterr().err
+    assert "doesn't; add rows for them, or mark them skip, and rerun:\n" in err
+    assert "\n  libgfortran\ngoing on with --skip-map-todo\n" in err
+    assert "06-upstream: 1 ok, 0 skipped, 0 error" in err
+    assert err.endswith("stopped after 06-upstream\n")
+    todo = dirs.episode / "library-map-todo.csv"
+    assert todo.read_text() == f"{header}\nlibgfortran,,,,,,,,,,,,\n"
+    assert (dirs.episode / "06-upstream.jsonl").is_file()
+    assert "skip_map_todo" not in (dirs.episode / "episode.json").read_text()
+
+    # The flag isn't recorded, so a run without it stops at the manual step.
+    assert run(dirs, "--count", "3") == 3
+    err = capsys.readouterr().err
+    assert "going on" not in err and "07-recognizers" not in err
+    assert not list(dirs.episode.glob("07-*"))

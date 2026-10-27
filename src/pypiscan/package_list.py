@@ -12,7 +12,7 @@ from pathlib import Path
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 
-MAX_PACKAGES = 100
+MAX_PACKAGES = 500
 COLUMNS = ["name", "version"]
 
 
