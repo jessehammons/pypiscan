@@ -1521,15 +1521,15 @@ and a few small deliverables other people can use.
   lists the 22 SBOM wheels, and in both psycopg wheels krb5 and cyrus-sasl
   still agree. Rerun `stale100` with `--stop-after 09`; its reports don't
   change except for that rename.
-- **C.3** The bundled-library atlas, `atlas.md` (see
+- **C.3** ✓ The bundled-library atlas, `atlas.md` (see
   [The bundled-library atlas](#the-bundled-library-atlas)). Manual check:
   rerun `top500-p1` with `--skip-map-todo --stop-after 09`; `atlas.md` has
   48 rows, 22 with an SBOM, and psycopg2-binary's krb5 shows CentOS 7, and
   the other reports don't change. Rerun `stale100` with `--stop-after 09`;
-  only `atlas.md` is new. ← current
+  only `atlas.md` is new.
 - **C.4** A tagged release of the top-500 probe, as a manual case of 8.1:
   the atlas, `library-report.md`, `sbom-report.md`, a short summary and
-  `SHA256SUMS`. No code.
+  `SHA256SUMS`. No code. ← current
 - **C.5** The large wheels, measured first as T.1 was. A small episode of
   the eight wheels the top-500 probe skipped as `too_large` that aren't
   NVIDIA's own CUDA libraries or model data: torch, tensorflow, vllm,

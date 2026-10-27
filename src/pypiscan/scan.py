@@ -24,6 +24,7 @@ from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 
 from pypiscan import fingerprint, version_function
+from pypiscan.atlas import report as atlas
 from pypiscan.cve_table import CveTableError, load_cve_table
 from pypiscan.detectors import DETECTORS
 from pypiscan.fetch import download
@@ -1072,6 +1073,23 @@ def write_sbom_report(
     (episode / "sbom-report.md").write_text(text, encoding="utf-8")
 
 
+def write_atlas(
+    episode: Path,
+    packages: Sequence[Package],
+    part_1: Sequence[str],
+    rows: Sequence[MapRow],
+) -> None:
+    """Rewrite atlas.md from part 1's phases (01 to 05) and 09; ``part_1``
+    names part 1's phases."""
+    text = atlas(
+        packages,
+        {name: _read_lines(episode / f"{name}.jsonl") for name in part_1},
+        _read_lines(episode / "09-sboms.jsonl"),
+        rows,
+    )
+    (episode / "atlas.md").write_text(text, encoding="utf-8")
+
+
 def write_staleness_report(
     episode: Path,
     packages: Sequence[Package],
@@ -1206,6 +1224,7 @@ def scan(
             write_staleness_report(episode, packages, names, rows, ambiguous, eols)
         if (episode / "09-sboms.jsonl").is_file():
             write_sbom_report(episode, packages, names, rows, ambiguous)
+            write_atlas(episode, packages, names, rows)
         if (episode / "10-static.jsonl").is_file():
             write_static_report(episode, packages, names, rows, ambiguous)
         if status or _stopped(part_3, stop_after, err):
