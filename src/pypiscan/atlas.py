@@ -197,8 +197,10 @@ def report(
         f"- Prefixes not in the map: {len(unmapped)}, with "
         f"{sum(unmapped.values())} files.",
         f"- Rows by platform tag: {_counted(c['tags'])}.",
-        f"- Rows with an SBOM: {with_sbom}; by kind: {_counted(c['row kinds'])}.",
-        f"- Scanned wheels with an SBOM but no `.libs/`: {other_sbom}; by kind: "
+        f"- Rows with an SBOM: {with_sbom}; by kind, a wheel with several "
+        f"kinds counts under each: {_counted(c['row kinds'])}.",
+        f"- Scanned wheels with an SBOM but no `.libs/`: {other_sbom}; by kind, "
+        f"a wheel with several kinds counts under each: "
         f"{_counted(c['other kinds'])}.",
         f"- Rows with a file tied to an auditwheel component: {tied_rows}; tied "
         f"files by build image: {_counted(c['images'])}.",

@@ -567,7 +567,9 @@ Then counts:
   files;
 - rows by platform tag;
 - rows with an SBOM, by kind, and scanned wheels with an SBOM but no
-  `.libs/`, by kind (they are in `sbom-report.md`, not here);
+  `.libs/`, by kind (they are in `sbom-report.md`, not here); a wheel
+  with several kinds counts under each, so the kinds can sum to more
+  than the wheels;
 - rows with a file tied to an auditwheel component, and tied files by
   build image.
 

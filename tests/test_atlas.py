@@ -158,9 +158,11 @@ EXPECTED = "\n".join(
         "- Prefixes not in the map: 1, with 2 files.",
         "- Rows by platform tag: manylinux_2_28_x86_64 4; "
         "manylinux_2_17_x86_64.manylinux2014_x86_64 1.",
-        "- Rows with an SBOM: 3; by kind: auditwheel 1; cargo-cyclonedx 1; "
+        "- Rows with an SBOM: 3; by kind, a wheel with several kinds counts "
+        "under each: auditwheel 1; cargo-cyclonedx 1; "
         "cyclonedx-json, no tools 1; error: not_json 1; pillow 1; spdx-json 1.",
-        "- Scanned wheels with an SBOM but no `.libs/`: 1; by kind: cargo-cyclonedx 1.",
+        "- Scanned wheels with an SBOM but no `.libs/`: 1; by kind, a wheel with "
+        "several kinds counts under each: cargo-cyclonedx 1.",
         "- Rows with a file tied to an auditwheel component: 1; tied files by "
         "build image: AlmaLinux 8 1; CentOS 7 1; Ubuntu, release unknown 1.",
         "",
@@ -235,3 +237,26 @@ def test_a_prefix_is_never_shown_as_a_library() -> None:
     assert "- Libraries by the map's name: 0; rows carrying each: none." in text
     assert "- Prefixes not in the map: 2, with 2 files." in text
     assert "## Packages not opened" not in text
+
+
+def test_a_wheel_with_two_kinds_counts_under_each() -> None:
+    two = [sbom("a.json", []), sbom("c.json", [], tool="cargo-cyclonedx")]
+    lines = {
+        "r": resolved("r", libs("r", "libfoo-11111111.so.1"), TAG),
+        "s": resolved("s", [], TAG),
+    }
+    text = report(
+        [Package("r", "1.0"), Package("s", "1.0")],
+        by_phase(lines),
+        {"r": ok("r", "r.whl", two), "s": ok("s", "s.whl", two)},
+        [],
+    )
+    each = "a wheel with several kinds counts under each"
+    assert (
+        f"- Rows with an SBOM: 1; by kind, {each}: auditwheel 1; cargo-cyclonedx 1.\n"
+    ) in text
+    assert (
+        f"- Scanned wheels with an SBOM but no `.libs/`: 1; by kind, {each}: "
+        "auditwheel 1; cargo-cyclonedx 1.\n"
+    ) in text
+    assert "| auditwheel, cargo-cyclonedx |" in text
