@@ -1315,6 +1315,99 @@ file. A changed **cpe** changes the map, so pre-flight check 5 already
 names phase 11's file. Which candidates the table lists is for a
 report that reads the table on every run (roadmap 6.3).
 
+## Findings so far
+
+pypiscan's results up to the checkpoint (see [Mini-roadmap:
+checkpoint](#mini-roadmap-checkpoint)). Nothing here names a CVE.
+
+### What popular wheels bundle
+
+The top-500 probe took the first 500 projects on the package list (pypi top
+downloads, prev 30 days) with a manylinux target wheel, which walked the
+list to rank 3252: 2682 of the projects passed over had no target wheel
+(none for CPython 3.12 on manylinux x86_64 with glibc 2.28 or older). It
+ran part 1 only (`--stop-after 05`), with the 100-row cap lifted by a local
+override, not by T.4.
+
+- Phase 01 resolved all 500. Phase 02 fetched 475 and skipped 25 as
+  `too_large` (over 100 MB; see C.5). The skipped wheels weren't opened, so
+  the counts below cover 475 wheels and are a floor.
+- 48 of the 475 have a `.libs/` directory, mostly scientific, media,
+  geospatial and database-driver packages.
+- Their manylinux tags, the oldest glibc each wheel claims, not the image
+  that built it: `manylinux2014` 7 (google-crc32c, ijson, cassandra-driver,
+  psycopg2-binary, psycopg-binary, simsimd, tables), `2_17` 3 (the same
+  policy as `manylinux2014`), `2_24` 2, `2_26` 3, `2_27` 15, `2_28` 18.
+- 22 of the 48 ship an SBOM, of the three kinds in [SBOMs in
+  wheels](#sboms-in-wheels). Where auditwheel's names the build image's
+  packages, the image shows. In those SBOMs, CentOS 7 packages appear only
+  in psycopg2-binary and psycopg-binary: krb5, cyrus-sasl, pcre, keyutils,
+  libcom_err and libselinux. psycopg documents this as a deliberate choice
+  for its binary packages. AlmaLinux 8 packages appear in many more: the
+  opencv packages, pymssql, memray, rdkit, cadquery-ocp, scipy,
+  scikit-learn, faiss-cpu and others.
+- A bundled package stays as the build image had it on the day of the
+  build: opencv's wheels carry `openssl-libs` `1.1.1k-15.el8_6`, and
+  pymssql's and memray's carry `1.1.1k-17.el8_6`. Whether the later builds
+  include security fixes hasn't been checked.
+- The same libraries recur. OpenSSL is the most duplicated: 12 wheels carry
+  their own libcrypto, among them psycopg2-binary, psycopg-binary, pymssql,
+  pycurl, pygit2, memray, rasterio, netcdf4, connectorx and the opencv
+  packages. libgomp is in 9 (scikit-learn, faiss-cpu, xgboost, ctranslate2
+  and others), libpng in 9, and libgfortran in 7 (numpy, scipy, scs,
+  faiss-cpu and the opencv packages). OpenBLAS is in 7 wheels from 5
+  projects, under five file names, and no two projects share a build:
+  numpy's `libscipy_openblas64_` (OpenBLAS's name for its 64-bit-integer
+  build), scipy's `libscipy_openblas`, faiss-cpu's `libopenblaso-r0` (its
+  name for the OpenMP build), scs's `libopenblas-r0`, and `libopenblasp-r0`
+  (the pthreads build) in the three opencv packages. ffmpeg's libraries are
+  in av and the opencv packages, HDF5 in h5py, netcdf4, rasterio and
+  tables, and Kerberos in the database drivers, connectorx and pycurl.
+  opencv-python, opencv-python-headless and opencv-contrib-python are
+  alternatives, so a count of wheels can count opencv three times:
+  libcrypto's 12 wheels are 10 projects.
+- The probe found 299 prefixes the library map doesn't list. Of these, only
+  libbz2 and libcurl are in five or more wheels.
+- The top-100 staleness run (`stale100`, see [The staleness
+  report](#the-staleness-report)) compared 27 bundled libraries with their
+  upstream releases on each wheel's upload day. On their own release lines,
+  22 were current and 5 behind: one by a day, and four that are a CentOS 7
+  build image's distribution packages. No `.libs/` prefix appears in more
+  than 2 of the 100 wheels.
+
+### Learnings from this measurement
+
+- A version number alone is weak evidence. A distribution's package keeps
+  its upstream version while it backports fixes, a maintained release line
+  gets fixes that a number behind the newest release hides, and a vendored
+  fork has its own numbering. Each breaks "version X, so vulnerable".
+- Scanning only `.libs/` misses static linking: pyarrow's bzip2 1.0.8 is
+  compiled into `libarrow`, pymupdf's zlib 1.3.2 into `libmupdf`, and
+  lxml's and grpcio's zlib into their extension modules (see [Mini-roadmap:
+  statically linked libraries](#mini-roadmap-statically-linked-libraries)).
+  What `.libs/` shows is less than what wheels carry.
+- An SBOM is a claim. numba 0.68.0's names a libgomp its wheel deletes
+  after repair, Pillow 12.3.0's marks libraries its wheel carries
+  `optional`, and a project's SBOM can leave libraries out (Pillow's omits
+  libpng, xz and brotli).
+- When working with Claude/Claude Code on a personal "Pro" plan, by far the
+  limiting factor is the "weekly" usage limit. So far, human intelligence
+  seems to be required and valuable to steer the code/platform/ecosystem
+  investigations into useful directions. It helps to have a plan in the
+  README, be specific with Claude Code about what to implement, and keep
+  implementation sprints very specific and focused.
+
+### Status
+
+CVE matching, 6.3 onward, is paused. Four tries came back thin: the top-100
+staleness run found 22 of 27 compared libraries current on their release
+lines, the static work found a handful of libraries, and in the top 500
+only 48 of 475 wheels bundle shared libraries at all. Those 48 share a
+familiar set (OpenSSL, compression and image codecs, compiler runtimes,
+ffmpeg, HDF5, Kerberos), and of the 299 prefixes the map doesn't list, only
+libbz2 and libcurl are in five or more wheels. At the level of popular
+packages, there is too little for matching to find.
+
 ## Roadmap
 
 Each item is one pull request (see
@@ -1322,6 +1415,67 @@ Each item is one pull request (see
 implemented in about 20–30 agent turns and reviewed on a phone. Items marked
 *(maintainer input)* need a decision before any code is written. Done items
 are marked ✓.
+
+### Mini-roadmap: checkpoint
+
+The CVE and staleness work has come back thin four times (see [Findings so
+far](#findings-so-far)). Popular maintainers mostly keep their libraries
+current, and a bare version is weak evidence. This mini-roadmap ends the
+current direction on a checkpoint: what was found, a pause on CVE matching,
+and a few small deliverables other people can use.
+
+- **C.1** ✓ The [Findings so far](#findings-so-far) section, docs only.
+- **C.2** (required for the bundled-library atlas, C.3) `scan
+  --skip-map-todo`: the manual step writes `library-map-todo.csv` and lists
+  the prefixes but doesn't stop, so `--stop-after 09` reaches phase 09 with
+  unmapped prefixes. Unmapped `.libs/` files show as not in the map in the
+  fingerprint and SBOM reports, never as missing. Manual check: rerun
+  `top500-p1` with `--skip-map-todo --stop-after 09`; `sbom-report.md`
+  lists the 22 SBOM wheels, and in both psycopg wheels krb5 and cyrus-sasl
+  still agree. ← current
+- **C.3** The bundled-library atlas, `atlas.md`, rewritten every run from
+  phases 01, 02, 05 and 09 (08 where it ran): one row per wheel with a
+  `.libs/` directory, its manylinux tag, its libraries grouped by the map's
+  library name (so OpenBLAS's five prefixes are one library), whether it
+  ships an SBOM and of which kind, and the build image's distribution and
+  release where an auditwheel component is tied to the file. Skipped wheels
+  are listed with their reason. It lists only shared libraries in `.libs/`,
+  and says so at its top: libraries compiled into extension modules, such
+  as cryptography's OpenSSL or lxml's zlib, aren't in it (see [Findings so
+  far](#findings-so-far)). Manual check: `top500-p1` gives 48 rows, 22 with
+  an SBOM, and psycopg2-binary's krb5 shows CentOS 7.
+- **C.4** A tagged release of the top-500 probe, as a manual case of 8.1:
+  the atlas, `library-report.md`, `sbom-report.md`, a short summary and
+  `SHA256SUMS`. No code.
+- **C.5** The large wheels, measured first as T.1 was. A small episode of
+  the eight wheels the top-500 probe skipped as `too_large` that aren't
+  NVIDIA's own CUDA libraries or model data: torch, tensorflow, vllm,
+  onnxruntime-gpu, triton, claude-agent-sdk, chdb-core and vtk, with the
+  wheel size limit raised and `--stop-after 10` (past the manual step by
+  C.2). It shows how many shared libraries they keep outside `.libs/`, in
+  their own package directories, and what static discovery finds in their
+  binaries, before any phase is changed to read them. The 16 `nvidia-*`
+  wheels, each one proprietary library with no upstream to compare, and
+  lingua-language-detector, large for its model data, stay out. Manual
+  check: the episode's library and static discovery reports, read for these
+  eight only.
+- **C.6** A hash joined with `.`: the prefix cutter also cuts at `.` and 8
+  hex digits, so `libz.915b4635` becomes `libz`. Tests use file names, as
+  3.7's do. Manual check: rerun `top500-p1` from phase 05; `libz.915b4635`
+  is gone from `library-map-todo.csv`, and no other prefix changes.
+- **C.7** Why a project has no target wheel. The 2682 projects the top-500
+  walk passed over are passed over by `scripts/top_packages.py`, not by
+  phase 01, so the script records each one's reason from its latest final
+  release's files: pure Python only, sdist only, Linux wheels needing glibc
+  newer than 2.28, no cp312 or `abi3` wheel, or other platforms only. It
+  writes them beside the list, with counts, so the compiled projects the
+  target rule misses can be counted and named. Manual check: the October
+  snapshot's walk to rank 3252 gives reasons summing to 2682.
+- **C.8** *(optional)* `pypiscan wheel <file>`: what one wheel bundles, for
+  a maintainer to run before a release: its `.libs/` libraries, manylinux
+  tag, SBOMs, auditwheel components tied to no file and files with no
+  component, and static candidates. Manual check: Pillow 12.3.0 and
+  psycopg2-binary 2.9.13 match their episode rows.
 
 ### Mini-roadmap: statically linked libraries
 
@@ -1401,9 +1555,10 @@ written for it.
   one zlib record with a conflict, pyarrow's bzip2 1.0.8 in
   `libarrow.so.2600` and pymupdf's zlib 1.3.2 in `libmupdf.so.28.2` are
   compared, and the `shared_lib` counts match the earlier report's.
-- **T.4** The top 500: the package list loader's 100-row cap (roadmap
-  3.2) is lifted, `scripts/top_packages.py` stops at 500, and a full run
-  scans them. ← current
+- **T.4** The top 500: the package list loader's 100-row cap (roadmap 3.2)
+  is lifted, `scripts/top_packages.py` stops at 500, and a full run scans
+  them. *(Paused at the [checkpoint](#mini-roadmap-checkpoint): the top-500
+  probe ran part 1 with a local override of the cap.)*
 
 ### Mini-roadmap: staleness of bundled libraries
 
@@ -1751,8 +1906,8 @@ again only rows.
   ranges, and flag disagreements. Tests use a small synthetic git
   repository. A CVE report, rewritten every run from phase 11 and the
   table, shows each candidate and whether the table lists it, as a row
-  or a **duplicates** entry, beside the verifier's flags. *(Paused for
-  the [mini-roadmap](#mini-roadmap-staleness-of-bundled-libraries).)*
+  or a **duplicates** entry, beside the verifier's flags. *(Paused at
+  the [checkpoint](#mini-roadmap-checkpoint).)*
 - **6.4** *(maintainer input)* Curation review: resolve flagged rows, one
   library per pull request. Corrections to public advisories are submitted
   upstream. A bug in an original library can also be in a fork's code
