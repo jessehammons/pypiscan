@@ -636,7 +636,8 @@ the map is edited, `scan` picks up at phase 06.
 ```
 pypiscan scan <package-list> --library-map M --ambiguous-versions A \
   --cve-table T --line-eol L --episode-dir D --cache-dir C --count N \
-  [--stop-after NN] [--skip-map-todo]
+  [--stop-after NN] [--skip-map-todo] \
+  [--wheel-size-limit MB] [--member-size-limit MB]
 ```
 
 - `--count` is required and takes the first N rows of the list: 1, 2, 5 or
@@ -671,6 +672,11 @@ pypiscan scan <package-list> --library-map M --ambiguous-versions A \
   without it stops at the manual step again, before any report is
   rewritten. Adding rows to the map afterwards means deleting phase 06's
   file and every later one (pre-flight check 5).
+- `--wheel-size-limit` and `--member-size-limit` are optional and set the
+  wheel size limit and the zip-member size limit, in MB of 1,000,000
+  bytes: 100 and 512 by default. A value below 1 exits 2. Both are
+  recorded in `episode.json` and matched by pre-flight check 4, so an
+  episode run with raised limits needs them on every rerun.
 - The episode directory holds one run's results. The cache directory holds
   downloaded wheels and upstream clones, both shared between episodes. A
   wheel is stored as `wheels/<sha256>/<filename>`: a directory named by
@@ -683,10 +689,12 @@ on manylinux x86_64 with glibc 2.28 or older. That includes `abi3` wheels
 `py3-none-manylinux…` wheels. Yanked files are never chosen. A release
 with only pure-Python wheels has no target, and phase 01 records it as
 `skipped` with reason `no_target`. A target wheel larger than the wheel
-size limit, 100 MB by the size PyPI reports, resolves normally in phase 01,
-and phase 02 records it as `skipped` with reason `too_large` without
-downloading it. Phase 03 skips zip members larger than the zip-member size
-limit, 512 MB uncompressed, since each member is read into memory.
+size limit, by the size PyPI reports (100 MB by default), resolves
+normally in phase 01, and phase 02 records it as `skipped` with reason
+`too_large` without downloading it. Phases 03 and 04 skip zip members
+larger than the zip-member size limit, 512 MB uncompressed by default,
+since each member is read into memory, and phase 09 doesn't read such a
+file.
 
 Phases, in order. Per-package phases have one line per package; per-library
 phases have one line per library in the map.
@@ -1167,6 +1175,14 @@ not scanned, by the phase where they stopped; binaries outside
 string risk; candidates that became `static_lib` records, those whose
 string is in a record's evidence; and distinct templates.
 
+**Binaries by file name.** For each package, the binaries outside
+`.libs/`, counted by their file names alone: extension modules, whose
+names end in `.cpython-<tag>.so` or `.abi3.so`; shared libraries, other
+names starting with `lib` and ending in `.so` or `.so.` and numbers,
+such as torch's `torch/lib/libtorch_cpu.so`; and other binaries, such as
+executables and other `.so` names. Names alone can miscount: an
+extension module with a bare `.so` name counts as another binary.
+
 **Candidates.** For each package, each candidate with its member,
 library, version, kind and matched string, labeled "unconfirmed static
 candidate", with an ambiguous version marked as the fingerprint report
@@ -1539,8 +1555,23 @@ and a few small deliverables other people can use.
   their own package directories, and what static discovery finds in their
   binaries, before any phase is changed to read them. The 16 `nvidia-*`
   wheels, each one proprietary library with no upstream to compare, and
-  lingua-language-detector, large for its model data, stay out. Manual
-  check: the episode's library and static discovery reports, read for these
+  lingua-language-detector, large for its model data, stay out. `scan`
+  gets `--wheel-size-limit` and `--member-size-limit`, the eight are
+  `data/large.csv`, and the static discovery report counts each wheel's
+  binaries outside `.libs/` by file name. Manual check, with limits that
+  cover the largest of the eight:
+
+  ```bash
+  uv run python -m pypiscan scan data/large.csv --count 8 \
+    --stop-after 10 --wheel-size-limit 1500 --member-size-limit 2048 \
+    --library-map data/libraries.csv \
+    --ambiguous-versions data/ambiguous_versions.csv \
+    --cve-table data/cves.toml --line-eol data/line_eol.csv \
+    --episode-dir ~/pypiscan/episodes/large-c5 \
+    --cache-dir ~/pypiscan/cache --skip-map-todo
+  ```
+
+  Then read the episode's library and static discovery reports for these
   eight only. ← current
 - **C.6** A hash joined with `.`: the prefix cutter also cuts at `.` and 8
   hex digits, so `libz.915b4635` becomes `libz`. Tests use file names, as
@@ -2257,6 +2288,19 @@ again only rows.
   several libraries is shown as the prefix with its libraries listed.
   Phase 08's records for the wheel could say which of them the file
   holds.
+
+- **Memory for huge zip members.** Phases 03, 04 and 10 read each member
+  whole into memory, so a raised `--member-size-limit` needs that much RAM.
+
+- **Cache disk space for large wheels.** C.5's eight wheels are several GB
+  in the cache, and nothing reports or prunes the cache's size.
+
+- **The `nvidia-*` and lingua wheels.** C.5 leaves out the 16 `nvidia-*`
+  wheels and lingua-language-detector; nothing measures them yet.
+
+- **Shared libraries by ELF header, not name.** The static report counts
+  binaries by file name; `DT_SONAME` or the ELF type would count them
+  without the name rules' misses.
 
 ## Data handling and disclosure
 

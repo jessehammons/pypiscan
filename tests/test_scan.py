@@ -24,6 +24,8 @@ from pypiscan.package_list import Package
 from pypiscan.scan import (
     EPISODE_SCHEMA_VERSION,
     EXIT_INTERRUPTED,
+    EXIT_PREFLIGHT,
+    MB,
     TARGET,
     WHEEL_SIZE_LIMIT,
     ZIP_MEMBER_SIZE_LIMIT,
@@ -153,6 +155,29 @@ def test_episode_json(dirs: Dirs) -> None:
     assert episode["code_version"] == "0.0.0"
     assert episode["schema_version"] == EPISODE_SCHEMA_VERSION == 2
     assert len(episode["package_list_sha256"]) == 64
+
+
+def test_episode_json_records_raised_size_limits(
+    dirs: Dirs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    limits = ("--wheel-size-limit", "1500", "--member-size-limit", "2048")
+    assert run(dirs, "--count", "3", *limits) == 0
+    episode = json.loads((dirs.episode / "episode.json").read_text())
+    assert episode["wheel_size_limit"] == 1500 * MB
+    assert episode["zip_member_size_limit"] == 2048 * MB
+    # A rerun with other limits is a different episode.
+    capsys.readouterr()
+    assert run(dirs, "--count", "3") == EXIT_PREFLIGHT
+    err = capsys.readouterr().err
+    assert f"wheel_size_limit is {1500 * MB}, but this run's is" in err
+    assert f"zip_member_size_limit is {2048 * MB}, but this run's is" in err
+
+
+def test_size_limits_below_1_are_usage_errors(dirs: Dirs) -> None:
+    for flag in ("--wheel-size-limit", "--member-size-limit"):
+        with pytest.raises(SystemExit) as exc:
+            run(dirs, "--count", "1", flag, "0")
+        assert exc.value.code == 2
 
 
 def test_rerun_skips_finished_phase(
@@ -463,6 +488,18 @@ def test_phase_02_too_large_is_skipped_without_downloading(tmp_path: Path) -> No
     assert not (tmp_path / "wheels").exists()
 
 
+def test_phase_02_raised_limit_downloads_a_wheel_over_the_default(
+    tmp_path: Path,
+) -> None:
+    phase = fetch_phase(RecordedClient(), tmp_path, 2 * WHEEL_SIZE_LIMIT)
+    previous = resolved_line(size=WHEEL_SIZE_LIMIT + 1)
+    # Not too_large: the download is attempted, and the recorded body's
+    # sha256 doesn't match.
+    result = phase.run(Package("foo", "1"), {"01-resolve": previous})
+    assert result.status == "error"
+    assert "does not match" in (result.reason or "")
+
+
 def test_phase_02_at_the_limit_downloads(tmp_path: Path) -> None:
     phase = fetch_phase(RecordedClient(), tmp_path)
     previous = resolved_line(size=WHEEL_SIZE_LIMIT)
@@ -542,9 +579,7 @@ def test_phase_03_reports_missing_file_as_error(tmp_path: Path) -> None:
     assert "no such file" in (result.reason or "")
 
 
-def test_phase_03_skips_oversized_zip_members(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_phase_03_skips_oversized_zip_members(tmp_path: Path) -> None:
     wheel = build_wheel(
         tmp_path / "big.whl",
         {
@@ -552,8 +587,7 @@ def test_phase_03_skips_oversized_zip_members(
             "big.libs/libhuge.so": b"\x7fELF" + b"\x00" * 1000,
         },
     )
-    monkeypatch.setattr(scan_module, "ZIP_MEMBER_SIZE_LIMIT", 100)
-    result = inspect_phase().run(Package("big", "1"), inspect_previous(wheel))
+    result = inspect_phase(100).run(Package("big", "1"), inspect_previous(wheel))
     assert result.status == "ok"
     records = result.data["records"]
     assert isinstance(records, list) and len(records) == 0
@@ -651,12 +685,9 @@ def test_phase_04_reports_bad_zip_as_error(tmp_path: Path) -> None:
     assert "not a valid zip" in (result.reason or "")
 
 
-def test_phase_04_skips_oversized_zip_members(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_phase_04_skips_oversized_zip_members(tmp_path: Path) -> None:
     wheel = build_wheel(tmp_path / "big.whl", {"big.libs/libbig.so": LIBS_ELF})
-    monkeypatch.setattr(scan_module, "ZIP_MEMBER_SIZE_LIMIT", 100)
-    result = strings_phase().run(Package("big", "1"), strings_earlier(wheel))
+    result = strings_phase(100).run(Package("big", "1"), strings_earlier(wheel))
     assert result.status == "ok"
     assert result.data["records"] == []
     assert result.data["skipped_members"] == [
@@ -776,7 +807,9 @@ LIBS = {
 }
 
 
-def stub_phases(client: object, cache_dir: Path, episode: Path) -> list[Phase]:
+def stub_phases(
+    client: object, cache_dir: Path, episode: Path, *limits: int
+) -> list[Phase]:
     """Phases 01 to 04 as stubs over LIBS, then the real phase 05."""
 
     def resolve(package: Package, earlier: Mapping[str, Line]) -> Result:
@@ -1030,7 +1063,9 @@ def test_scan_stops_for_the_manual_step(
 def test_report_shows_why_a_package_stopped_at_phase_02(
     dirs: Dirs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def with_too_large(client: object, cache_dir: Path, episode: Path) -> list[Phase]:
+    def with_too_large(
+        client: object, cache_dir: Path, episode: Path, *limits: int
+    ) -> list[Phase]:
         stubs = stub_phases(client, cache_dir, episode)
 
         def too_large(package: Package, earlier: Mapping[str, Line]) -> Result:
@@ -1657,7 +1692,9 @@ AUDITWHEEL_SBOM = json.dumps(
 ).encode()
 
 
-def with_auditwheel_sbom(client: object, cache_dir: Path, episode: Path) -> list[Phase]:
+def with_auditwheel_sbom(
+    client: object, cache_dir: Path, episode: Path, *limits: int
+) -> list[Phase]:
     """The stub phases, with an auditwheel SBOM in demo's wheel."""
     stubs = stub_phases(client, cache_dir, episode)
 
@@ -1692,7 +1729,7 @@ def test_sbom_report_is_rewritten_once_phase_09_is_finished(
     # Stopped in phase 09: the fingerprint report is written, the SBOM
     # report isn't.
     monkeypatch.setattr(
-        scan_module, "sboms_phase", lambda: Phase("09-sboms", interrupt)
+        scan_module, "sboms_phase", lambda limit: Phase("09-sboms", interrupt)
     )
     assert run(dirs, "--count", "3") == EXIT_INTERRUPTED
     fingerprints = (dirs.episode / "fingerprint-report.md").read_bytes()
@@ -1851,7 +1888,7 @@ def test_phase_11_waits_between_requests_across_libraries(dirs: Dirs) -> None:
 def test_stop_during_part_3_leaves_no_phase_10(
     dirs: Dirs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def interrupting_sboms() -> Phase[Package]:
+    def interrupting_sboms(limit: int) -> Phase[Package]:
         def interrupt(package: Package, earlier: Mapping[str, Line]) -> Result:
             handler = signal.getsignal(signal.SIGINT)
             assert callable(handler)

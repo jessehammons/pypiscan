@@ -383,3 +383,25 @@ def test_report_counts_candidates_that_became_records(tmp_path: Path) -> None:
     del cast(list[Line], static["pkg"]["binaries"])[0]["fingerprints"]
     text = report([Package("pkg", "1")], phases, static, ROWS, {})
     assert "- 0 candidates that became static_lib records\n" in text
+
+
+def test_report_counts_binaries_by_file_name(tmp_path: Path) -> None:
+    plain = build_elf(None)
+    members = {
+        "pkg/lib/libtorch_cpu.so": plain,
+        "pkg/lib/libgomp.so.1": plain,
+        "pkg/_C.cpython-312-x86_64-linux-gnu.so": plain,
+        "pkg/_rust.abi3.so": plain,
+        "pkg/lib_ext.cpython-312-x86_64-linux-gnu.so": plain,
+        "pkg/bin/protoc": plain,
+        "pkg/_pywrap.so": plain,
+        "pkg.libs/libz-1a2b3c4d.so.1": plain,
+    }
+    lines = earlier(wheel(tmp_path, members))
+    static = {"pkg": {"status": "ok", "reason": None, **run(lines).data}}
+    phases = {"04-strings": {"pkg": lines["04-strings"]}}
+    text = report([Package("pkg", "1")], phases, static, ROWS, AMBIGUOUS)
+    assert "`pkg.whl`: 7 binaries outside `.libs/`\n" in text
+    assert (
+        "By file name: 2 shared libraries, 3 extension modules, 2 other binaries\n"
+    ) in text
