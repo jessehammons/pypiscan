@@ -711,8 +711,9 @@ Part 1:
 5. `05-libraries` (per package): each shared library in the wheel's
    `.libs/` directory, with its path and prefix: the filename cut at
    auditwheel's hash, `-` and 8 hex digits, so `libjpeg-1a2b3c4d.so.62.4.0`
-   becomes `libjpeg`. A library repaired twice has two hashes, and the
-   first one cuts. A name with no hash is cut at its first `.so`. Then the
+   becomes `libjpeg`. A hash joined with `.`, such as `libz.915b4635`, isn't
+   auditwheel's but is cut the same way, so it becomes `libz`. A library
+   repaired twice has two hashes, and the first hash in the name cuts. A name with no hash is cut at its first `.so`. Then the
    phase writes the library report into the episode, `library-report.md`:
    prefixes ordered by how many wheels carry them, and for each, how many
    wheels and files carry it, the packages carrying it, and all of its
@@ -1602,7 +1603,8 @@ and a few small deliverables other people can use.
   hex digits, so `libz.915b4635` becomes `libz`. Tests use file names, as
   3.7's do. Manual check: rerun `top500-p1` from phase 05; `libz.915b4635`
   is gone from `library-map-todo.csv`, and no other prefix
-  changes. ← current
+  changes. `libz` takes its place in the todo, since zlib's map row has
+  no prefix. ← current
 - **C.7** Why a project has no target wheel. The 2682 projects the top-500
   walk passed over are passed over by `scripts/top_packages.py`, not by
   phase 01, so the script records each one's reason from its latest final
@@ -2331,6 +2333,14 @@ again only rows.
 - **Rust crate versions as zstd's.** chdb-core 26.9.0's static
   candidates give zstd 0.11.2+zstd.1.5.2, 0.13.0 and 0.13.3, which look
   like the Rust `zstd` crate's versions, not zstd's own.
+
+- **Decimal digits after `.` as a hash.** The prefix cutter (C.6) cuts at
+  `.` and 8 hex digits, so 8 decimal digits, such as a date-like version
+  in `libfoo.20240101.so`, are cut too. This is accepted for now.
+
+- **`libz` has no map row.** After C.6, `libz.915b4635` gives the prefix
+  `libz`, which the todo lists, since zlib's map row has no prefix.
+  Mapping it needs a prefix on zlib's row.
 
 - **"1 binary" in the static report.** A wheel with one binary outside
   `.libs/` says `1 binary outside`, so a grep for `binaries outside`, as
