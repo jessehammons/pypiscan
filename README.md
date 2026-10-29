@@ -713,8 +713,9 @@ Part 1:
    auditwheel's hash, `-` and 8 hex digits, so `libjpeg-1a2b3c4d.so.62.4.0`
    becomes `libjpeg`. A hash joined with `.`, such as `libz.915b4635`, isn't
    auditwheel's but is cut the same way, so it becomes `libz`. A library
-   repaired twice has two hashes, and the first hash in the name cuts. A name with no hash is cut at its first `.so`. Then the
-   phase writes the library report into the episode, `library-report.md`:
+   repaired twice has two hashes, and the first hash in the name cuts. A
+   name with no hash is cut at its first `.so`. Then the phase writes the
+   library report into the episode, `library-report.md`:
    prefixes ordered by how many wheels carry them, and for each, how many
    wheels and files carry it, the packages carrying it, and all of its
    `strings` templates, ranked by how many wheels carry each one with ties
@@ -2349,7 +2350,9 @@ again only rows.
   `libz.915b4635` and `libcudart.faf08d9a` give the prefixes `libz` and
   `libcudart`, which the todo lists. zlib's map row has no prefix, so
   mapping `libz` needs a prefix on it, and `libcudart` needs a row of
-  its own.
+  its own. The zlib detector (`detectors/zlib.py`) recognizes file names
+  only with a `-` hash, so mapping `libz` should check that it also finds
+  torchvision's `libz.915b4635.so.1`.
 
 - **"1 binary" in the static report.** A wheel with one binary outside
   `.libs/` says `1 binary outside`, so a grep for `binaries outside`, as
