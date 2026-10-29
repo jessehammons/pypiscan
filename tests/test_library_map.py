@@ -50,7 +50,7 @@ def test_committed_map_loads() -> None:
     path = Path(__file__).parent.parent / "data" / "libraries.csv"
     rows = load_library_map(path)
     assert path.read_text().startswith(HEADER + "\n")
-    assert len({row.prefix for row in rows if row.prefix}) == 43
+    assert len({row.prefix for row in rows if row.prefix}) == 44
 
 
 def test_rows_of_every_kind(tmp_path: Path) -> None:

@@ -51,3 +51,4 @@ libzmq,libzmq,https://github.com/zeromq/libzmq,v{version},,single_line,version_f
 libzstd,zstd,https://github.com/facebook/zstd,v{version},,single_line,build_path,{any}/zstd-{version}/{any},,,,facebook:zstandard,
 libzstd,zstd,https://github.com/facebook/zstd,v{version},,single_line,bare_version,{version},lib/zstd.h,,,facebook:zstandard,
 ,zlib,https://github.com/madler/zlib,v{version},\d+\.\d+\.\d+\.\d+,single_line,,,,,detector,zlib:zlib,
+libpybind11nonlimitedapi_stubs,skip,,,,,,,,,,,

@@ -1546,7 +1546,7 @@ and a few small deliverables other people can use.
   the other reports don't change. Rerun `stale100` with `--stop-after 09`;
   only `atlas.md` is new.
 - **C.4** Now C.9, so the release carries the probe as C.5 to C.8 leave it.
-- **C.5** The large wheels, measured first as T.1 was. A small episode of
+- **C.5** ✓ The large wheels, measured first as T.1 was. A small episode of
   the eight wheels the top-500 probe skipped as `too_large` that aren't
   NVIDIA's own CUDA libraries or model data: torch, tensorflow, vllm,
   onnxruntime-gpu, triton, claude-agent-sdk, chdb-core and vtk, with the
@@ -1573,11 +1573,36 @@ and a few small deliverables other people can use.
   ```
 
   Then read the episode's library and static discovery reports for these
-  eight only. ← current
+  eight only. Results (`large-c5`; no wheel or member was skipped for
+  size, and every phase line is `ok` apart from phase 07's three
+  libraries without a recognizer):
+
+  | wheel | outside `.libs/` | shared libraries by name | static candidates |
+  |---|---|---|---|
+  | torch 2.14.1 | 16 | 12 | none |
+  | triton 3.8.0 | 25 | 19 | none |
+  | claude-agent-sdk 0.2.174 | 1 | 0 | bzip2 1.0.8, libjpeg-turbo 3.2.0 |
+  | tensorflow 2.21.0 | 77 | 6 | libjpeg-turbo 2.1.4, zlib 1.3.1 |
+  | vtk 9.7.1 | 376 | 222 | libpng 1.6.58, libtiff 4.6.0, zlib 1.3.1 |
+  | vllm 0.32.0 | 14 | 0 | openssl 3.5.5 |
+  | onnxruntime-gpu 1.31.0 | 5 | 4 | none |
+  | chdb-core 26.9.0 | 8 | 7 | krb5 1.22.2, openssl 3.5.8, zstd |
+
+  The eight hold 522 binaries outside `.libs/`, 270 of them shared
+  libraries by name, and 19 candidates, 9 of which became `static_lib`
+  records. The openssl, libtiff and bzip2 candidates are marked header
+  string risk, and chdb-core's three zstd versions (0.11.2+zstd.1.5.2,
+  0.13.0 and 0.13.3) look like Rust `zstd` crate versions, not zstd's.
+  Phase 10 already reads every one of these binaries, so in-package
+  libraries are not invisible: what a phase reading them as `.libs/`
+  files would add is the prefix-bound kinds, bare versions and version
+  functions, and their names carry no auditwheel hash, so most of the
+  270, such as vtk's, would be new prefixes for the map.
 - **C.6** A hash joined with `.`: the prefix cutter also cuts at `.` and 8
   hex digits, so `libz.915b4635` becomes `libz`. Tests use file names, as
   3.7's do. Manual check: rerun `top500-p1` from phase 05; `libz.915b4635`
-  is gone from `library-map-todo.csv`, and no other prefix changes.
+  is gone from `library-map-todo.csv`, and no other prefix
+  changes. ← current
 - **C.7** Why a project has no target wheel. The 2682 projects the top-500
   walk passed over are passed over by `scripts/top_packages.py`, not by
   phase 01, so the script records each one's reason from its latest final
@@ -2299,8 +2324,17 @@ again only rows.
 - **The `nvidia-*` and lingua wheels.** C.5 leaves out the 16 `nvidia-*`
   wheels and lingua-language-detector; nothing measures them yet.
 
-- **The top-500 package list isn't committed.** Only `top500-p1`'s
-  `01-resolve.jsonl` records the list the probe used.
+- **The top-500 package list isn't committed.** The probe's list,
+  `packages500.csv`, lives outside the repository, beside the episodes;
+  in the repository only C.5's eight rows come from it.
+
+- **Rust crate versions as zstd's.** chdb-core 26.9.0's static
+  candidates give zstd 0.11.2+zstd.1.5.2, 0.13.0 and 0.13.3, which look
+  like the Rust `zstd` crate's versions, not zstd's own.
+
+- **"1 binary" in the static report.** A wheel with one binary outside
+  `.libs/` says `1 binary outside`, so a grep for `binaries outside`, as
+  C.5's manual step used, misses its line.
 
 - **Shared libraries by ELF header, not name.** The static report counts
   binaries by file name; `DT_SONAME` or the ELF type would count them
