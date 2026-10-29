@@ -1557,13 +1557,14 @@ and a few small deliverables other people can use.
   wheels, each one proprietary library with no upstream to compare, and
   lingua-language-detector, large for its model data, stay out. `scan`
   gets `--wheel-size-limit` and `--member-size-limit`, the eight are
-  `data/large.csv`, and the static discovery report counts each wheel's
-  binaries outside `.libs/` by file name. Manual check, with limits that
-  cover the largest of the eight:
+  `data/large.csv`, at the versions in `top500-p1`'s phase 01, and the
+  static discovery report counts each wheel's binaries outside `.libs/`
+  by file name. Manual check, with limits that
+  cover the largest of the eight (tensorflow, 546 MB):
 
   ```bash
   uv run python -m pypiscan scan data/large.csv --count 8 \
-    --stop-after 10 --wheel-size-limit 1500 --member-size-limit 2048 \
+    --stop-after 10 --wheel-size-limit 1000 --member-size-limit 2048 \
     --library-map data/libraries.csv \
     --ambiguous-versions data/ambiguous_versions.csv \
     --cve-table data/cves.toml --line-eol data/line_eol.csv \
@@ -2297,6 +2298,9 @@ again only rows.
 
 - **The `nvidia-*` and lingua wheels.** C.5 leaves out the 16 `nvidia-*`
   wheels and lingua-language-detector; nothing measures them yet.
+
+- **The top-500 package list isn't committed.** Only `top500-p1`'s
+  `01-resolve.jsonl` records the list the probe used.
 
 - **Shared libraries by ELF header, not name.** The static report counts
   binaries by file name; `DT_SONAME` or the ELF type would count them

@@ -22,6 +22,15 @@ without downloading any wheels.
 | `grpcio` | Statically linked zlib with a four-part version (1.3.1.1, roadmap 2.1), and a target tagged `manylinux2014` / `manylinux_2_17`. |
 | `cryptography` | An `abi3` target wheel that links OpenSSL statically. |
 
+## `large.csv`
+
+The eight large wheels of roadmap C.5, which the top-500 probe skipped as
+`too_large` and which aren't NVIDIA's CUDA libraries or model data. Each
+version is the one `top500-p1`'s `01-resolve.jsonl` resolved, so the
+episode measures the wheels the probe skipped. Scanning them needs
+`--wheel-size-limit` and `--member-size-limit` raised (see the C.5 bullet
+in the README).
+
 ## `packages.csv`
 
 The full package list for `scan` (roadmap 3.6): 100 rows, in rank order.
