@@ -1529,9 +1529,7 @@ and a few small deliverables other people can use.
   48 rows, 22 with an SBOM, and psycopg2-binary's krb5 shows CentOS 7, and
   the other reports don't change. Rerun `stale100` with `--stop-after 09`;
   only `atlas.md` is new.
-- **C.4** A tagged release of the top-500 probe, as a manual case of 8.1:
-  the atlas, `library-report.md`, `sbom-report.md`, a short summary and
-  `SHA256SUMS`. No code. ← current
+- **C.4** Now C.9, so the release carries the probe as C.5 to C.8 leave it.
 - **C.5** The large wheels, measured first as T.1 was. A small episode of
   the eight wheels the top-500 probe skipped as `too_large` that aren't
   NVIDIA's own CUDA libraries or model data: torch, tensorflow, vllm,
@@ -1543,7 +1541,7 @@ and a few small deliverables other people can use.
   wheels, each one proprietary library with no upstream to compare, and
   lingua-language-detector, large for its model data, stay out. Manual
   check: the episode's library and static discovery reports, read for these
-  eight only.
+  eight only. ← current
 - **C.6** A hash joined with `.`: the prefix cutter also cuts at `.` and 8
   hex digits, so `libz.915b4635` becomes `libz`. Tests use file names, as
   3.7's do. Manual check: rerun `top500-p1` from phase 05; `libz.915b4635`
@@ -1561,6 +1559,9 @@ and a few small deliverables other people can use.
   tag, SBOMs, auditwheel components tied to no file and files with no
   component, and static candidates. Manual check: Pillow 12.3.0 and
   psycopg2-binary 2.9.13 match their episode rows.
+- **C.9** A tagged release of the top-500 probe, as a manual case of 8.1:
+  the atlas, `library-report.md`, `sbom-report.md`, a short summary and
+  `SHA256SUMS`. No code.
 
 ### Mini-roadmap: statically linked libraries
 
