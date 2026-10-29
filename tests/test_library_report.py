@@ -27,6 +27,12 @@ from pypiscan.wheel_strings import VERSION_TOKEN, StringRecord, template
         ("x.libs/libquadmath-2284e583-a9307bba.so.0.0.0", "libquadmath"),
         # A hash is followed by the extension or another hash.
         ("x.libs/libfoo-1a2b3c4dx.so", "libfoo-1a2b3c4dx"),
+        # A hash joined with "." is cut the same way.
+        ("x.libs/libz.915b4635.so.1.3.1", "libz"),
+        ("x.libs/libfoo.1a2b3c4d-5e6f7a8b.so", "libfoo"),
+        ("x.libs/libfoo.1a2b3c4.so.1", "libfoo.1a2b3c4"),
+        ("x.libs/libfoo.1A2B3C4D.so", "libfoo.1A2B3C4D"),
+        ("x.libs/libfoo.1a2b3c4dx.so", "libfoo.1a2b3c4dx"),
         # No hash: cut at the first ".so".
         ("x.libs/libssl.so.3", "libssl"),
         ("x.libs/libfoo-1A2B3C4D.so", "libfoo-1A2B3C4D"),

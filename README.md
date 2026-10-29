@@ -711,9 +711,11 @@ Part 1:
 5. `05-libraries` (per package): each shared library in the wheel's
    `.libs/` directory, with its path and prefix: the filename cut at
    auditwheel's hash, `-` and 8 hex digits, so `libjpeg-1a2b3c4d.so.62.4.0`
-   becomes `libjpeg`. A library repaired twice has two hashes, and the
-   first one cuts. A name with no hash is cut at its first `.so`. Then the
-   phase writes the library report into the episode, `library-report.md`:
+   becomes `libjpeg`. A hash joined with `.`, such as `libz.915b4635`, isn't
+   auditwheel's but is cut the same way, so it becomes `libz`. A library
+   repaired twice has two hashes, and the first hash in the name cuts. A
+   name with no hash is cut at its first `.so`. Then the phase writes the
+   library report into the episode, `library-report.md`:
    prefixes ordered by how many wheels carry them, and for each, how many
    wheels and files carry it, the packages carrying it, and all of its
    `strings` templates, ranked by how many wheels carry each one with ties
@@ -1598,11 +1600,19 @@ and a few small deliverables other people can use.
   files would add is the prefix-bound kinds, bare versions and version
   functions, and their names carry no auditwheel hash, so most of the
   270, such as vtk's, would be new prefixes for the map.
-- **C.6** A hash joined with `.`: the prefix cutter also cuts at `.` and 8
+- **C.6** ✓ A hash joined with `.`: the prefix cutter also cuts at `.` and 8
   hex digits, so `libz.915b4635` becomes `libz`. Tests use file names, as
-  3.7's do. Manual check: rerun `top500-p1` from phase 05; `libz.915b4635`
-  is gone from `library-map-todo.csv`, and no other prefix
-  changes. ← current
+  3.7's do. Manual check: rerun `top500-p1` from phase 05. Results: the
+  572 `.libs/` files are the same before and after, and exactly 7
+  prefixes changed, all in `torchvision.libs`, the one wheel in
+  `top500-p1` whose names carry a `.`-joined hash: `libcudart.faf08d9a`,
+  `libjpeg.67fb65bd`, `libnvjpeg.36e11081`, `libpng16.1d0d8f4e`,
+  `libsharpyuv.64944e6b`, `libwebp.bab959f1` and `libz.915b4635` lose
+  their hashes. `library-map-todo.csv` has 5 fewer rows: libjpeg,
+  libpng16, libsharpyuv and libwebp now join mapped prefixes and leave
+  it, libnvjpeg was already listed, and `libcudart` and `libz` replace
+  their hashed forms (zlib's map row has no prefix). No other prefix
+  changed.
 - **C.7** Why a project has no target wheel. The 2682 projects the top-500
   walk passed over are passed over by `scripts/top_packages.py`, not by
   phase 01, so the script records each one's reason from its latest final
@@ -1610,7 +1620,7 @@ and a few small deliverables other people can use.
   newer than 2.28, no cp312 or `abi3` wheel, or other platforms only. It
   writes them beside the list, with counts, so the compiled projects the
   target rule misses can be counted and named. Manual check: the October
-  snapshot's walk to rank 3252 gives reasons summing to 2682.
+  snapshot's walk to rank 3252 gives reasons summing to 2682. ← current
 - **C.8** *(optional)* `pypiscan wheel <file>`: what one wheel bundles, for
   a maintainer to run before a release: its `.libs/` libraries, manylinux
   tag, SBOMs, auditwheel components tied to no file and files with no
@@ -2331,6 +2341,18 @@ again only rows.
 - **Rust crate versions as zstd's.** chdb-core 26.9.0's static
   candidates give zstd 0.11.2+zstd.1.5.2, 0.13.0 and 0.13.3, which look
   like the Rust `zstd` crate's versions, not zstd's own.
+
+- **Decimal digits after `.` as a hash.** The prefix cutter (C.6) cuts at
+  `.` and 8 hex digits, so 8 decimal digits, such as a date-like version
+  in `libfoo.20240101.so`, are cut too. This is accepted for now.
+
+- **`libz` and `libcudart` have no map row.** After C.6, torchvision's
+  `libz.915b4635` and `libcudart.faf08d9a` give the prefixes `libz` and
+  `libcudart`, which the todo lists. zlib's map row has no prefix, so
+  mapping `libz` needs a prefix on it, and `libcudart` needs a row of
+  its own. The zlib detector (`detectors/zlib.py`) recognizes file names
+  only with a `-` hash, so mapping `libz` should check that it also finds
+  torchvision's `libz.915b4635.so.1`.
 
 - **"1 binary" in the static report.** A wheel with one binary outside
   `.libs/` says `1 binary outside`, so a grep for `binaries outside`, as

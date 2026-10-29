@@ -18,22 +18,25 @@ from pypiscan.wheel_strings import StringRecord
 
 TEMPLATE_LIMIT = 200
 
-# auditwheel's hash: "-" and 8 hex digits, before the extension or, in a
+# A hash: "-" or "." and 8 hex digits, before the extension or, in a
 # library repaired twice (numpy's libgfortran-83c28eba-468e71e5.so.5.0.0),
-# before another hash.
-AUDITWHEEL_HASH = re.compile(r"-[0-9a-f]{8}(?=[-.])")
+# before another hash. auditwheel joins its hash with "-"; one joined with
+# "." (libz.915b4635.so.1.3.1) isn't auditwheel's but is cut the same way.
+HASH = re.compile(r"[-.][0-9a-f]{8}(?=[-.])")
 
 Line = Mapping[str, object]
 
 
 def prefix(path: str) -> str:
-    """A `.libs/` member's name without auditwheel's hash and what follows it.
+    """A `.libs/` member's name without its hash and what follows it.
 
-    ``libjpeg-1a2b3c4d.so.62.4.0`` gives ``libjpeg``. A name with no such
-    hash is cut at its first ``.so``.
+    ``libjpeg-1a2b3c4d.so.62.4.0`` gives ``libjpeg``. A hash joined with
+    ``.`` isn't auditwheel's but is cut the same way, so
+    ``libz.915b4635.so.1.3.1`` gives ``libz``. The first hash in the name
+    cuts. A name with no hash is cut at its first ``.so``.
     """
     name = path.rpartition("/")[2]
-    match = AUDITWHEEL_HASH.search(name)
+    match = HASH.search(name)
     if match:
         return name[: match.start()]
     end = name.find(".so")
