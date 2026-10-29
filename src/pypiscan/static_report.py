@@ -8,6 +8,7 @@ the result as ``static-report.md``. Phases other than 04, 05 and 10 only
 show where a package stopped.
 """
 
+import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -34,9 +35,27 @@ fingerprint record and not a finding. A candidate marked header string risk
 matches a string from a public header, which shows what a binary was
 compiled against, not that it contains the library.
 """
+# How a binary outside `.libs/` is counted, by its file name only.
+EXTENSION = re.compile(r".*\.(cpython-[^.]+|abi3)\.so")
+SHARED = re.compile(r"lib.*\.so(\.[0-9]+)*")
 TABLE = (
     "| member | library | version | kind | string | note |\n|---|---|---|---|---|---|"
 )
+
+
+def _by_name(paths: Sequence[str]) -> str:
+    """How many of ``paths`` are shared libraries, extension modules and
+    other binaries, by the rules in README "The static discovery report"."""
+    names = [path.rsplit("/", 1)[-1] for path in paths]
+    extensions = sum(bool(EXTENSION.fullmatch(name)) for name in names)
+    shared = sum(
+        bool(SHARED.fullmatch(name)) and not EXTENSION.fullmatch(name) for name in names
+    )
+    return (
+        f"{count(shared, 'shared library', 'shared libraries')}, "
+        f"{count(extensions, 'extension module')}, "
+        f"{count(len(names) - shared - extensions, 'other binary', 'other binaries')}"
+    )
 
 
 def _header_rows(rows: Sequence[MapRow]) -> set[tuple[str, str, str]]:
@@ -191,6 +210,8 @@ def report(
         sections += [
             f"`{line['wheel']}`: {count(len(found), 'binary', 'binaries')} "
             "outside `.libs/`",
+            "",
+            "By file name: " + _by_name([str(binary["path"]) for binary in found]),
             "",
         ]
         sections += [TABLE, *table] if table else ["No candidates."]

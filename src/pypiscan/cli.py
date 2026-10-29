@@ -9,7 +9,14 @@ from pypiscan.fetch import fetch_release
 from pypiscan.fingerprint import fingerprint_wheel
 from pypiscan.package_list import check_release
 from pypiscan.pypi import HttpClient, PyPIError, UrllibClient
-from pypiscan.scan import EXIT_PREFLIGHT, PHASE_NUMBERS, scan
+from pypiscan.scan import (
+    EXIT_PREFLIGHT,
+    MB,
+    PHASE_NUMBERS,
+    WHEEL_SIZE_LIMIT,
+    ZIP_MEMBER_SIZE_LIMIT,
+    scan,
+)
 from pypiscan.wheel_inspect import WheelError, inspect_wheel
 from pypiscan.wheel_sboms import sboms_wheel
 from pypiscan.wheel_strings import strings_wheel
@@ -146,6 +153,22 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
         help="List the prefixes the library map doesn't, but go on to phase 06 "
         "rather than stopping for the manual step.",
     )
+    p_scan.add_argument(
+        "--wheel-size-limit",
+        type=int,
+        default=WHEEL_SIZE_LIMIT // MB,
+        metavar="MB",
+        help="Skip a target wheel larger than this, by the size PyPI reports, "
+        "as too_large (default %(default)s).",
+    )
+    p_scan.add_argument(
+        "--member-size-limit",
+        type=int,
+        default=ZIP_MEMBER_SIZE_LIMIT // MB,
+        metavar="MB",
+        help="Skip a zip member larger than this, uncompressed, without "
+        "reading it (default %(default)s).",
+    )
     args = parser.parse_args(argv)
     if args.command == "scan":
         if None in (args.count, args.ambiguous_versions, args.cve_table, args.line_eol):
@@ -153,6 +176,10 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
             return EXIT_PREFLIGHT
         if args.count < 1:
             p_scan.error("--count must be at least 1")
+        if args.wheel_size_limit < 1 or args.member_size_limit < 1:
+            p_scan.error(
+                "--wheel-size-limit and --member-size-limit must be at least 1"
+            )
         return scan(
             args.package_list,
             args.library_map,
@@ -166,6 +193,8 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
             sys.stderr,
             stop_after=args.stop_after,
             skip_map_todo=args.skip_map_todo,
+            wheel_size_limit=args.wheel_size_limit * MB,
+            member_size_limit=args.member_size_limit * MB,
         )
     if args.command == "fetch":
         return fetch(args.release, args.cache_dir, client or UrllibClient())

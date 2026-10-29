@@ -167,17 +167,20 @@ def resolve_phase(client: HttpClient) -> Phase[Package]:
     return Phase("01-resolve", run)
 
 
-def fetch_phase(client: HttpClient, cache_dir: Path) -> Phase[Package]:
+def fetch_phase(
+    client: HttpClient, cache_dir: Path, wheel_size_limit: int = WHEEL_SIZE_LIMIT
+) -> Phase[Package]:
     """Phase 02: download each wheel into the cache, verifying its sha256.
 
     Builds the ``WheelFile`` from phase 01's line instead of calling PyPI
     again. A wheel whose reported size is over the wheel size limit is
     recorded as ``skipped`` with reason ``too_large`` and never downloaded.
+    ``wheel_size_limit`` is in bytes.
     """
 
     def run(package: Package, earlier: Mapping[str, Line]) -> Result:
         line = earlier["01-resolve"]
-        if cast(int, line["size"]) > WHEEL_SIZE_LIMIT:
+        if cast(int, line["size"]) > wheel_size_limit:
             return Result("skipped", "too_large")
         wheel = WheelFile(
             filename=cast(str, line["filename"]),
@@ -195,7 +198,7 @@ def fetch_phase(client: HttpClient, cache_dir: Path) -> Phase[Package]:
     return Phase("02-fetch", run)
 
 
-def inspect_phase() -> Phase[Package]:
+def inspect_phase(member_size_limit: int = ZIP_MEMBER_SIZE_LIMIT) -> Phase[Package]:
     """Phase 03: ``inspect`` records for each wheel's ELF members.
 
     Zip members whose declared uncompressed size is over the zip-member
@@ -206,7 +209,7 @@ def inspect_phase() -> Phase[Package]:
         wheel_path = Path(cast(str, earlier["02-fetch"]["path"]))
         skipped: list[SkippedMember] = []
         try:
-            records = inspect_wheel(wheel_path, ZIP_MEMBER_SIZE_LIMIT, skipped)
+            records = inspect_wheel(wheel_path, member_size_limit, skipped)
         except WheelError as exc:
             return Result("error", str(exc))
         return Result(
@@ -222,7 +225,7 @@ def inspect_phase() -> Phase[Package]:
     return Phase("03-inspect", run)
 
 
-def strings_phase() -> Phase[Package]:
+def strings_phase(member_size_limit: int = ZIP_MEMBER_SIZE_LIMIT) -> Phase[Package]:
     """Phase 04: ``strings`` records for each wheel's ELF members.
 
     Reads the wheel's path from phase 02's line, and skips oversized zip
@@ -233,7 +236,7 @@ def strings_phase() -> Phase[Package]:
         wheel_path = Path(cast(str, earlier["02-fetch"]["path"]))
         skipped: list[SkippedMember] = []
         try:
-            records = strings_wheel(wheel_path, ZIP_MEMBER_SIZE_LIMIT, skipped)
+            records = strings_wheel(wheel_path, member_size_limit, skipped)
         except WheelError as exc:
             return Result("error", str(exc))
         return Result(
@@ -417,7 +420,7 @@ def fingerprint_phase(recognizer_lines: Sequence[Line]) -> Phase[Package]:
     return Phase("08-fingerprint", run)
 
 
-def sboms_phase() -> Phase[Package]:
+def sboms_phase(member_size_limit: int = ZIP_MEMBER_SIZE_LIMIT) -> Phase[Package]:
     """Phase 09: ``sbom`` records for each wheel, read from phase 02's path
     once its sha256 matches phase 01's. Files over the zip-member size limit
     aren't read."""
@@ -430,7 +433,7 @@ def sboms_phase() -> Phase[Package]:
             if _sha256(wheel_path) != earlier["01-resolve"]["sha256"]:
                 reason = f"wheel {wheel_path}'s sha256 differs from phase 01's"
                 return Result("error", reason)
-            records = sboms_wheel(wheel_path, ZIP_MEMBER_SIZE_LIMIT)
+            records = sboms_wheel(wheel_path, member_size_limit)
         except (OSError, WheelError) as exc:
             return Result("error", str(exc))
         return Result(
@@ -596,12 +599,18 @@ def static_phase(
     return Phase("10-static", run, schema_version=STATIC_SCHEMA_VERSION)
 
 
-def phases(client: HttpClient, cache_dir: Path, episode: Path) -> list[Phase[Package]]:
+def phases(
+    client: HttpClient,
+    cache_dir: Path,
+    episode: Path,
+    wheel_size_limit: int = WHEEL_SIZE_LIMIT,
+    member_size_limit: int = ZIP_MEMBER_SIZE_LIMIT,
+) -> list[Phase[Package]]:
     return [
         resolve_phase(client),
-        fetch_phase(client, cache_dir),
-        inspect_phase(),
-        strings_phase(),
+        fetch_phase(client, cache_dir, wheel_size_limit),
+        inspect_phase(member_size_limit),
+        strings_phase(member_size_limit),
         libraries_phase(episode),
     ]
 
@@ -795,14 +804,19 @@ def _phase_file_problems(episode: Path) -> list[str]:
     return problems
 
 
-def episode_inputs(package_list: Path, count: int) -> Line:
+def episode_inputs(
+    package_list: Path,
+    count: int,
+    wheel_size_limit: int = WHEEL_SIZE_LIMIT,
+    member_size_limit: int = ZIP_MEMBER_SIZE_LIMIT,
+) -> Line:
     """The inputs a rerun must match; the code version is recorded, not matched."""
     return {
         "package_list_sha256": _sha256(package_list),
         "count": count,
         "target": TARGET,
-        "wheel_size_limit": WHEEL_SIZE_LIMIT,
-        "zip_member_size_limit": ZIP_MEMBER_SIZE_LIMIT,
+        "wheel_size_limit": wheel_size_limit,
+        "zip_member_size_limit": member_size_limit,
     }
 
 
@@ -865,6 +879,8 @@ def preflight(
     episode: Path,
     cache: Path,
     count: int,
+    wheel_size_limit: int = WHEEL_SIZE_LIMIT,
+    member_size_limit: int = ZIP_MEMBER_SIZE_LIMIT,
 ) -> tuple[list[Package], list[MapRow], Ambiguous, LineEol, int, list[str]]:
     """Checks 1 to 5. Returns the packages, map rows, ambiguous versions,
     lines' ends of life, clamped count and problems. The CVE table is only
@@ -894,7 +910,10 @@ def preflight(
         return [], rows, ambiguous, eols, 0, [*problems, str(exc)]
     count = min(count, len(packages))
     problems += _phase_file_problems(episode)
-    problems += _episode_problems(episode, episode_inputs(package_list, count))
+    problems += _episode_problems(
+        episode,
+        episode_inputs(package_list, count, wheel_size_limit, member_size_limit),
+    )
     return packages[:count], rows, ambiguous, eols, count, problems
 
 
@@ -1150,11 +1169,14 @@ def scan(
     sleep: Callable[[float], None] = time.sleep,
     stop_after: str | None = None,
     skip_map_todo: bool = False,
+    wheel_size_limit: int = WHEEL_SIZE_LIMIT,
+    member_size_limit: int = ZIP_MEMBER_SIZE_LIMIT,
 ) -> int:
     """Pre-flight, then create the directories, record episode.json and run.
     ``sleep`` paces phase 11's requests to NVD. ``stop_after``, a phase's
     number, ends the run with exit 0 once that phase is finished.
-    ``skip_map_todo`` keeps the manual step from stopping the run."""
+    ``skip_map_todo`` keeps the manual step from stopping the run. The size
+    limits, in bytes, are recorded in episode.json and matched on reruns."""
     packages, rows, ambiguous, eols, count, problems = preflight(
         package_list,
         library_map,
@@ -1164,6 +1186,8 @@ def scan(
         episode,
         cache,
         count,
+        wheel_size_limit,
+        member_size_limit,
     )
     for problem in problems:
         print(f"pypiscan scan: error: {problem}", file=err)
@@ -1173,7 +1197,9 @@ def scan(
     cache.mkdir(parents=True, exist_ok=True)
     record = episode / "episode.json"
     if not record.is_file():
-        inputs = episode_inputs(package_list, count)
+        inputs = episode_inputs(
+            package_list, count, wheel_size_limit, member_size_limit
+        )
         write_json(
             record,
             {
@@ -1189,7 +1215,7 @@ def scan(
 
     handler = signal.signal(signal.SIGINT, on_sigint)
     try:
-        part_1 = phases(client, cache, episode)
+        part_1 = phases(client, cache, episode, wheel_size_limit, member_size_limit)
         status = run_phases(episode, packages, _through(part_1, stop_after), stop, err)
         # The manual step comes between phases 05 and 06, once 05 is finished.
         if not status and (episode / "05-libraries.jsonl").is_file():
@@ -1210,7 +1236,7 @@ def scan(
         recognizer_lines = list(recognizers.values())
         part_3 = [
             fingerprint_phase(recognizer_lines),
-            sboms_phase(),
+            sboms_phase(member_size_limit),
             static_phase(recognizer_lines, rows),
         ]
         names = [phase.name for phase in part_1]

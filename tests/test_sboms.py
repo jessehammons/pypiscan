@@ -500,10 +500,13 @@ def episode(tmp_path: Path, wheels: dict[str, Path | None]) -> Path:
     return ep
 
 
-def run_09(ep: Path, names: list[str]) -> tuple[list[Line], str]:
+def run_09(
+    ep: Path, names: list[str], limit: int = ZIP_MEMBER_SIZE_LIMIT
+) -> tuple[list[Line], str]:
     err = io.StringIO()
     packages = [Package(name, "1.0") for name in names]
-    status = run_phases(ep, packages, [sboms_phase()], Stop(), err, finished=FINISHED)
+    phase = sboms_phase(limit)
+    status = run_phases(ep, packages, [phase], Stop(), err, finished=FINISHED)
     assert status == 0
     text = (ep / "09-sboms.jsonl").read_text()
     return [json.loads(line) for line in text.splitlines()], err.getvalue()
@@ -576,3 +579,6 @@ def test_phase_09_reads_members_up_to_the_zip_member_limit(
     wheel = build_wheel(tmp_path / WHEEL, {})
     run_09(episode(tmp_path, {"demo": wheel}), ["demo"])
     assert seen == [ZIP_MEMBER_SIZE_LIMIT]
+    (tmp_path / "raised").mkdir()
+    run_09(episode(tmp_path / "raised", {"demo": wheel}), ["demo"], 3)
+    assert seen == [ZIP_MEMBER_SIZE_LIMIT, 3]
