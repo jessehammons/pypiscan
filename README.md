@@ -1433,10 +1433,13 @@ list to rank 3252: 2682 of the projects passed over had no target wheel
 ran part 1 only (`--stop-after 05`), with the 100-row cap lifted by a local
 override, not by T.4.
 Of the 2682 passed over (C.7), 2573 have only pure-Python wheels and 74
-only an sdist; 35 ship compiled wheels the target rule misses: 15 need
-glibc newer than 2.28 (among them the pyside6 packages, debugpy and
-semgrep), 10 have no manylinux x86_64 wheel (psycopg2, mysqlclient, pycairo
-and others) and 10 have none for cp312 or `abi3`.
+only an sdist. Only 15 are compiled for CPython 3.12 on Linux x86_64 but
+miss the target for needing glibc newer than 2.28, among them the pyside6
+packages, debugpy and semgrep. Another 10 have no manylinux x86_64 wheel:
+some are Windows-only (pywin32, pywinpty), and others, such as psycopg2,
+mysqlclient and pycairo, are compiled from their sdists on Linux. The last
+10 have no cp312 or `abi3` wheel, mostly because they target other Python
+versions (audioop-lts, pyyaml-ft, backports-zoneinfo, typed-ast).
 
 - Phase 01 resolved all 500. Phase 02 fetched 475 and skipped 25 as
   `too_large` (over 100 MB; see C.5). The skipped wheels weren't opened, so
