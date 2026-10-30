@@ -1432,6 +1432,14 @@ list to rank 3252: 2682 of the projects passed over had no target wheel
 (none for CPython 3.12 on manylinux x86_64 with glibc 2.28 or older). It
 ran part 1 only (`--stop-after 05`), with the 100-row cap lifted by a local
 override, not by T.4.
+Of the 2682 passed over (C.7), 2573 have only pure-Python wheels and 74
+only an sdist. Only 15 are compiled for CPython 3.12 on Linux x86_64 but
+miss the target for needing glibc newer than 2.28, among them the pyside6
+packages, debugpy and semgrep. Another 10 have no manylinux x86_64 wheel:
+some are Windows-only (pywin32, pywinpty), and others, such as psycopg2,
+mysqlclient and pycairo, are compiled from their sdists on Linux. The last
+10 have no cp312 or `abi3` wheel, mostly because they target other Python
+versions (audioop-lts, pyyaml-ft, backports-zoneinfo, typed-ast).
 
 - Phase 01 resolved all 500. Phase 02 fetched 475 and skipped 25 as
   `too_large` (over 100 MB; see C.5). The skipped wheels weren't opened, so
@@ -1613,19 +1621,47 @@ and a few small deliverables other people can use.
   it, libnvjpeg was already listed, and `libcudart` and `libz` replace
   their hashed forms (zlib's map row has no prefix). No other prefix
   changed.
-- **C.7** Why a project has no target wheel. The 2682 projects the top-500
+- **C.7** ✓ Why a project has no target wheel. The 2682 projects the top-500
   walk passed over are passed over by `scripts/top_packages.py`, not by
   phase 01, so the script records each one's reason from its latest final
   release's files: pure Python only, sdist only, Linux wheels needing glibc
   newer than 2.28, no cp312 or `abi3` wheel, or other platforms only. It
   writes them beside the list, with counts, so the compiled projects the
   target rule misses can be counted and named. Manual check: the October
-  snapshot's walk to rank 3252 gives reasons summing to 2682. ← current
+  snapshot's walk to rank 3252 gives reasons summing to 2682. Results
+  (snapshot `last_update` 2026-10-01 12:40:51, sha256 `55fee05e…7041`,
+  walked on 2026-10-30): the walk stopped at rank 3252 with 2682
+  projects without a target, the same as the top-500 walk, and 70 more
+  with no final release (67 of them opentelemetry or Azure
+  projects). The reasons sum to 2682:
+
+  | reason | projects |
+  |---|---|
+  | `pure_python` | 2573 |
+  | `sdist_only` | 74 |
+  | `glibc_newer_than_2_28` | 15 |
+  | `other_platforms` | 10 |
+  | `no_cp312_or_abi3` | 10 |
+  | `other` | 0 |
+
+  - `glibc_newer_than_2_28`: debugpy, caio, semgrep,
+    tensorboard-data-server, llguidance, tree-sitter-language-pack,
+    ibm-db, onepassword-sdk, pyside6-essentials, shiboken6,
+    pyside6-addons, sglang, pyside6, stpyv8 and pyqt6-qt6.
+  - `other_platforms`: psycopg2, mysqlclient, sounddevice, pywin32,
+    pyzbar, scandir, pycairo, fasttext, pywinpty and gssapi.
+  - `no_cp312_or_abi3`: multiprocess, frozendict, pyyaml-ft,
+    audioop-lts, numpy-financial, backports-zoneinfo, typed-ast,
+    cx-oracle, netifaces and zipfile-deflate64.
+
+  The 500 projects selected are the same names as the top-500 walk's
+  list; 80 of them have a newer version than that list pins, since PyPI
+  releases moved on, so the list file itself differs.
 - **C.8** *(optional)* `pypiscan wheel <file>`: what one wheel bundles, for
   a maintainer to run before a release: its `.libs/` libraries, manylinux
   tag, SBOMs, auditwheel components tied to no file and files with no
   component, and static candidates. Manual check: Pillow 12.3.0 and
-  psycopg2-binary 2.9.13 match their episode rows.
+  psycopg2-binary 2.9.13 match their episode rows. ← current
 - **C.9** A tagged release of the top-500 probe, as a manual case of 8.1:
   the atlas, `library-report.md`, `sbom-report.md`, a short summary and
   `SHA256SUMS`. No code.
@@ -2361,6 +2397,22 @@ again only rows.
 - **Shared libraries by ELF header, not name.** The static report counts
   binaries by file name; `DT_SONAME` or the ELF type would count them
   without the name rules' misses.
+
+- **sdist-only projects may be compiled.** C.7 counts a project with no
+  wheel as `sdist_only`, but its sdist may build C extensions or bundle C
+  libraries, which isn't knowable without building it.
+
+- **No-target reasons from the latest release only.** C.7 reads each
+  project's latest final release, so a project whose older releases had a
+  target wheel, or that would have one under a different rule, isn't told
+  apart.
+
+- **`other` lumps requires_python exclusions.** C.7's `other` covers a
+  wheel the tags accept whose Requires-Python excludes 3.12, beside wheel
+  names that don't parse.
+
+- **The top-pypi-packages snapshot isn't committed.** `--snapshot` reads
+  a local copy, identified only by the sha256 the script prints.
 
 ## Data handling and disclosure
 
