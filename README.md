@@ -2362,6 +2362,22 @@ again only rows.
   binaries by file name; `DT_SONAME` or the ELF type would count them
   without the name rules' misses.
 
+- **sdist-only projects may be compiled.** C.7 counts a project with no
+  wheel as `sdist_only`, but its sdist may build C extensions or bundle C
+  libraries, which isn't knowable without building it.
+
+- **No-target reasons from the latest release only.** C.7 reads each
+  project's latest final release, so a project whose older releases had a
+  target wheel, or that would have one under a different rule, isn't told
+  apart.
+
+- **`other` lumps requires_python exclusions.** C.7's `other` covers a
+  wheel the tags accept whose Requires-Python excludes 3.12, beside wheel
+  names that don't parse.
+
+- **The top-pypi-packages snapshot isn't committed.** `--snapshot` reads
+  a local copy, identified only by the sha256 the script prints.
+
 ## Data handling and disclosure
 
 - CVE matches against *current* releases are never written into this
