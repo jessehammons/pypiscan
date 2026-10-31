@@ -612,6 +612,41 @@ Below the table, every package without a row that wasn't opened, with
 the phase where it stopped and that phase's reason, as the fingerprint
 report shows it, such as `skipped at 02-fetch: too_large`.
 
+## One wheel
+
+`pypiscan wheel <file> --library-map M` shows what one wheel bundles, for
+a maintainer to run before a release. It runs phases 03, 04, 05, 09 and
+10 (see [How a scan runs](#how-a-scan-runs)) over the file, through the
+same code as `scan`, so its results are what an episode would record for
+that wheel. It reads no other data file, uses no network and no cache.
+If a phase's line isn't `ok`, it prints `pypiscan wheel: error: ` and the
+phase, status and reason to stderr and exits 1.
+
+It writes JSON Lines with its own `schema_version`, each record with a
+`kind`:
+
+- `wheel`: `filename`, `sha256`, and `platform_tags`, the filename's
+  platform tag split at `.`, such as `manylinux_2_17_x86_64` and
+  `manylinux2014_x86_64`.
+- `library`: one per `.libs/` file in phase 05's line: `path`, `prefix`,
+  and `libraries`, the map's libraries for the prefix (`skip` for a
+  prefix marked so), empty when the map doesn't list it. A prefix can
+  map to several libraries, so it is a list.
+- `sbom`: one per phase 09 record, as `sbom`, unchanged.
+- `untied_component`: an auditwheel component tied to no `.libs/` file
+  (see
+  [Comparing SBOMs with fingerprints](#comparing-sboms-with-fingerprints)),
+  as `component`.
+- `untied_file`: the `path` of a `.libs/` file tied to no component,
+  only when the wheel has an auditwheel SBOM.
+- `static`: one per binary in phase 10's line with candidates or
+  `static_lib` records: `path`, `sha256`, `candidates` and
+  `fingerprints`, as phase 10 stores them. These are unconfirmed
+  candidates, as in [the static discovery report](#the-static-discovery-report).
+
+It gives no versions for `.libs/` files and no readable summary yet (see
+[Later](#later-tbd)).
+
 ## How a scan runs
 
 `scan` runs every package on a committed list through a fixed sequence of
@@ -1660,8 +1695,10 @@ and a few small deliverables other people can use.
 - **C.8** *(optional)* `pypiscan wheel <file>`: what one wheel bundles, for
   a maintainer to run before a release: its `.libs/` libraries, manylinux
   tag, SBOMs, auditwheel components tied to no file and files with no
-  component, and static candidates. Manual check: Pillow 12.3.0 and
-  psycopg2-binary 2.9.13 match their episode rows. ← current
+  component, and static candidates (see [One wheel](#one-wheel)). Manual
+  check: Pillow 12.3.0 and psycopg2-binary 2.9.13 match their rows in a
+  fresh two-package episode run with the current library map through
+  phase 10. ← current
 - **C.9** A tagged release of the top-500 probe, as a manual case of 8.1:
   the atlas, `library-report.md`, `sbom-report.md`, a short summary and
   `SHA256SUMS`. No code.
@@ -2414,6 +2451,17 @@ again only rows.
 - **The top-pypi-packages snapshot isn't committed.** `--snapshot` reads
   a local copy, identified only by the sha256 the script prints.
 
+- **A readable summary from `pypiscan wheel`.** A `--format text` summary
+  for maintainers, beside the JSON Lines.
+
+- **`.libs/` versions in `pypiscan wheel`.** Its `library` records name
+  libraries but no versions; phase 08's fingerprints, with their basis,
+  would add them.
+
+- **`pypiscan wheel` takes the package's name and version from the
+  filename.** Phase 10's records carry the filename only, so nothing
+  depends on it yet.
+
 ## Data handling and disclosure
 
 - CVE matches against *current* releases are never written into this
@@ -2493,6 +2541,9 @@ Run as `python -m pypiscan <subcommand>`.
   library's upstream repository into a temporary directory and regenerate
   `tests/upstream/<library>.tsv` from the detectors' citations. Needs the
   network.
+- `python3 scripts/wheel_vs_episode.py <wheel.jsonl> <episode> <name>`:
+  compare `pypiscan wheel` output with one package's lines in an episode
+  (C.8's manual check). Standard library only.
 - `uv run python scripts/top_packages.py`: regenerate `data/packages.csv`
   from the current top-pypi-packages snapshot (see `data/README.md`). Needs
   the network.
