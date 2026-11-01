@@ -20,6 +20,7 @@ from pypiscan.scan import (
 from pypiscan.wheel_inspect import WheelError, inspect_wheel
 from pypiscan.wheel_sboms import sboms_wheel
 from pypiscan.wheel_strings import strings_wheel
+from pypiscan.wheel_summary import summarize
 
 
 def _emit(command: str, produce: Callable[[], Sequence[object]]) -> int:
@@ -47,6 +48,10 @@ def sbom(wheel: Path) -> int:
 
 def fingerprint(wheel: Path) -> int:
     return _emit("fingerprint", lambda: fingerprint_wheel(wheel, DETECTORS))
+
+
+def wheel(path: Path, library_map: Path) -> int:
+    return _emit("wheel", lambda: summarize(path, library_map))
 
 
 def fetch(release: tuple[str, str], cache_dir: Path, client: HttpClient) -> int:
@@ -88,6 +93,19 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
         help="Identify bundled libraries and versions in a wheel as JSON Lines.",
     )
     p_fingerprint.add_argument("wheel", type=Path, help="Path to a .whl file.")
+    p_wheel = sub.add_parser(
+        "wheel",
+        help="List what one wheel bundles: its .libs/ libraries, platform tags, "
+        "SBOMs, auditwheel components and files left untied, and static "
+        "candidates, as JSON Lines.",
+    )
+    p_wheel.add_argument("wheel", type=Path, help="Path to a .whl file.")
+    p_wheel.add_argument(
+        "--library-map",
+        type=Path,
+        required=True,
+        help="Library map CSV file, normally data/libraries.csv.",
+    )
     p_fetch = sub.add_parser(
         "fetch",
         help="Download a release's target wheel into the cache, verify its "
@@ -202,6 +220,8 @@ def main(argv: Sequence[str] | None = None, client: HttpClient | None = None) ->
         return strings(args.wheel)
     if args.command == "sbom":
         return sbom(args.wheel)
+    if args.command == "wheel":
+        return wheel(args.wheel, args.library_map)
     if args.command == "fingerprint":
         return fingerprint(args.wheel)
     return inspect(args.wheel)
