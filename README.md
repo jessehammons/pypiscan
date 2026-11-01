@@ -1692,16 +1692,28 @@ and a few small deliverables other people can use.
   The 500 projects selected are the same names as the top-500 walk's
   list; 80 of them have a newer version than that list pins, since PyPI
   releases moved on, so the list file itself differs.
-- **C.8** *(optional)* `pypiscan wheel <file>`: what one wheel bundles, for
-  a maintainer to run before a release: its `.libs/` libraries, manylinux
-  tag, SBOMs, auditwheel components tied to no file and files with no
-  component, and static candidates (see [One wheel](#one-wheel)). Manual
-  check: Pillow 12.3.0 and psycopg2-binary 2.9.13 match their rows in a
-  fresh two-package episode run with the current library map through
-  phase 10. ← current
+- **C.8** ✓ *(optional)* `pypiscan wheel <file>`: what one wheel bundles,
+  for a maintainer to run before a release: its `.libs/` libraries,
+  manylinux tag, SBOMs, auditwheel components tied to no file and files
+  with no component, and static candidates (see [One wheel](#one-wheel)).
+  Manual check: Pillow 12.3.0 and psycopg2-binary 2.9.13 match their rows
+  in a fresh two-package episode run with the current library map through
+  phase 10. Results (`c8-check`, with `scripts/wheel_vs_episode.py`): for
+  both wheels the sha256 matches phase 01's, and phases 05, 09 and 10
+  match the episode's lines. Neither wheel has static candidates or
+  untied auditwheel components:
+
+  | wheel | `.libs/` files | SBOMs | untied files |
+  |---|---|---|---|
+  | Pillow 12.3.0 | 18 | 2 | 17 |
+  | psycopg2-binary 2.9.13 | 15 | 1 | 6 |
+
+  These agree with the episode's `sbom-report.md`: in Pillow only `libXau`
+  is tied to an auditwheel component, and in psycopg2-binary 9 files are
+  tied and libcrypt, libcrypto, liblber, libldap, libpq and libssl aren't.
 - **C.9** A tagged release of the top-500 probe, as a manual case of 8.1:
   the atlas, `library-report.md`, `sbom-report.md`, a short summary and
-  `SHA256SUMS`. No code.
+  `SHA256SUMS`. No code. ← current
 
 ### Mini-roadmap: statically linked libraries
 

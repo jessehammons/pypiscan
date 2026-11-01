@@ -9,6 +9,8 @@ the output's wheel sha256 against phase 01's. Always exits 0.
 Standard library only, so it runs with any python3.
 """
 
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path
