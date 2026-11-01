@@ -76,7 +76,8 @@ def phase_lines(wheel: Path, rows: Sequence[MapRow]) -> dict[str, Line]:
     """Phases 03, 04, 05, 09 and 10's lines for ``wheel``, keyed by phase."""
     if not wheel.is_file():
         raise WheelError(f"{wheel} is not a file")
-    sha256 = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    with wheel.open("rb") as f:
+        sha256 = hashlib.file_digest(f, "sha256").hexdigest()
     name, _, rest = wheel.name.partition("-")
     package = Package(name, rest.partition("-")[0])
     earlier: dict[str, Line] = {
