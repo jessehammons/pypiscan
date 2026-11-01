@@ -1544,11 +1544,45 @@ versions (audioop-lts, pyyaml-ft, backports-zoneinfo, typed-ast).
   README, be specific with Claude Code about what to implement, and keep
   implementation sprints very specific and focused.
 
+### Static copies in one wheel: pyarrow 26.0.0
+
+Preliminary, from manual checks on 2026-10-31 outside the scan (see C.10).
+In pyarrow 26.0.0's cp312 manylinux_2_28 x86_64 wheel:
+
+- Global symbol names in `.symtab` (the binaries keep global symbols but
+  no file symbols) show statically linked libraries that `.libs/`, the
+  SBOMs and phase 10's recognizers don't: `libarrow` defines OpenSSL,
+  curl, protobuf, libxml2, zstd, brotli, LZ4, snappy, zlib and bzip2;
+  `libarrow_s3` defines its own OpenSSL, curl and zlib plus the AWS SDK;
+  `libparquet` defines OpenSSL's libcrypto and Thrift. `libarrow_acero`
+  defines none of these. Counts are of defined symbols, so these are
+  separate copies, not references.
+- Banners in both `libarrow` and `libarrow_s3`: OpenSSL 3.6.2, libcurl
+  8.20.0, zlib 1.3.2. `libparquet` has no OpenSSL banner.
+- Every binary with these copies also carries a second `.comment` entry,
+  the build image's system GCC 8.5.0 next to gcc-toolset-14, so the
+  bundled dependencies were evidently compiled separately.
+- `libarrow` and `libarrow_s3` export none of these symbols. `libparquet`
+  exports its libcrypto (913 `EVP_` symbols in `.dynsym`, 609 dynamic
+  relocations against them, no `DT_SYMBOLIC`), so its calls into its own
+  copy can be interposed.
+- Shown on Linux with `LD_DEBUG=bindings` (Python 3.13's wheel): without a
+  preload, libparquet's `EVP_` symbols bind to libparquet. With
+  `LD_PRELOAD` of the system's OpenSSL 3.0.13 libcrypto, most bind to the
+  system copy, while `EVP_SKEYMGMT_up_ref` and `EVP_SKEYMGMT_free`, which
+  3.0 lacks (they are from 3.5), stay in libparquet. One code path then
+  runs two OpenSSL builds. No failure has been shown yet.
+
+Two lessons: a symbol census finds static copies that strings miss, and a
+statically linked library that a wheel exports may not be the one that
+runs, so the version on disk is weaker evidence still.
+
 ### Status
 
 CVE matching, 6.3 onward, is paused. Four tries came back thin: the top-100
 staleness run found 22 of 27 compared libraries current on their release
-lines, the static work found a handful of libraries, and in the top 500
+lines, the static work found a handful of libraries (a limit of its
+recognizers: see pyarrow above), and in the top 500
 only 48 of 475 wheels bundle shared libraries at all. Those 48 share a
 familiar set (OpenSSL, compression and image codecs, compiler runtimes,
 ffmpeg, HDF5, Kerberos), and of the 299 prefixes the map doesn't list, only
@@ -1714,6 +1748,16 @@ and a few small deliverables other people can use.
 - **C.9** A tagged release of the top-500 probe, as a manual case of 8.1:
   the atlas, `library-report.md`, `sbom-report.md`, a short summary and
   `SHA256SUMS`. No code. ← current
+- **C.10** *(maintainer input)* Follow up [Static copies in one wheel:
+  pyarrow 26.0.0](#static-copies-in-one-wheel-pyarrow-2600). Manual
+  steps first: repeat the binding check on the cp312 wheel; a Parquet
+  modular-encryption round trip with and without the preload; find in
+  Arrow's build at `apache-arrow-26.0.0` why `libarrow` hides its bundled
+  symbols and `libparquet` doesn't; search apache/arrow's issues, and
+  report upstream if it's new. Then decide whether a symbol census
+  (curated prefix table, defined symbols only, in the static report)
+  becomes an evidence kind, after measuring how many of the 48 wheels keep
+  a `.symtab` or export symbols.
 
 ### Mini-roadmap: statically linked libraries
 
