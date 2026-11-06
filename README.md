@@ -2518,6 +2518,14 @@ again only rows.
   filename.** Phase 10's records carry the filename only, so nothing
   depends on it yet.
 
+- **Signing releases.** 8.1 has the maintainer sign a release, but a
+  signature adds nothing until the public key is published somewhere
+  other than this repository, so C.9's release isn't signed.
+
+- **Which reports a release carries.** C.9's release carries the atlas,
+  `library-report.md` and `sbom-report.md`. Whether later releases also
+  carry the staleness, fingerprint and static reports is open.
+
 ## Data handling and disclosure
 
 - CVE matches against *current* releases are never written into this
