@@ -1501,7 +1501,7 @@ versions (audioop-lts, pyyaml-ft, backports-zoneinfo, typed-ast).
   their own libcrypto, among them psycopg2-binary, psycopg-binary, pymssql,
   pycurl, pygit2, memray, rasterio, netcdf4, connectorx and the opencv
   packages. libgomp is in 9 (scikit-learn, faiss-cpu, xgboost, ctranslate2
-  and others), libpng in 9, and libgfortran in 7 (numpy, scipy, scs,
+  and others), libpng in 10, and libgfortran in 7 (numpy, scipy, scs,
   faiss-cpu and the opencv packages). OpenBLAS is in 7 wheels from 5
   projects, under five file names, and no two projects share a build:
   numpy's `libscipy_openblas64_` (OpenBLAS's name for its 64-bit-integer
@@ -1513,8 +1513,14 @@ versions (audioop-lts, pyyaml-ft, backports-zoneinfo, typed-ast).
   opencv-python, opencv-python-headless and opencv-contrib-python are
   alternatives, so a count of wheels can count opencv three times:
   libcrypto's 12 wheels are 10 projects.
-- The probe found 299 prefixes the library map doesn't list. Of these, only
+- The probe found 294 prefixes the library map doesn't list. Of these, only
   libbz2 and libcurl are in five or more wheels.
+- These figures are from `top500-c9`, the episode C.9 released. Against
+  `top500-p1`, libpng's wheels went from 9 to 10 and the unmapped prefixes
+  from 299 to 294, all from torchvision's `.`-joined prefixes, cut since
+  C.6 (see [Mini-roadmap: checkpoint](#mini-roadmap-checkpoint)): libjpeg,
+  libpng16, libsharpyuv and libwebp now join mapped prefixes, and
+  `libnvjpeg` one already listed.
 - The top-100 staleness run (`stale100`, see [The staleness
   report](#the-staleness-report)) compared 27 bundled libraries with their
   upstream releases on each wheel's upload day. On their own release lines,
@@ -1585,7 +1591,7 @@ lines, the static work found a handful of libraries (a limit of its
 recognizers: see pyarrow above), and in the top 500
 only 48 of 475 wheels bundle shared libraries at all. Those 48 share a
 familiar set (OpenSSL, compression and image codecs, compiler runtimes,
-ffmpeg, HDF5, Kerberos), and of the 299 prefixes the map doesn't list, only
+ffmpeg, HDF5, Kerberos), and of the 294 prefixes the map doesn't list, only
 libbz2 and libcurl are in five or more wheels. At the level of popular
 packages, there is too little for matching to find.
 
@@ -1745,9 +1751,13 @@ and a few small deliverables other people can use.
   These agree with the episode's `sbom-report.md`: in Pillow only `libXau`
   is tied to an auditwheel component, and in psycopg2-binary 9 files are
   tied and libcrypt, libcrypto, liblber, libldap, libpq and libssl aren't.
-- **C.9** A tagged release of the top-500 probe, as a manual case of 8.1:
+- **C.9** ✓ A tagged release of the top-500 probe, as a manual case of 8.1:
   the atlas, `library-report.md`, `sbom-report.md`, a short summary and
-  `SHA256SUMS`. No code. ← current
+  `SHA256SUMS`. No code. It is the GitHub release
+  [`top500-2026-11-06`](https://github.com/jessehammons/pypiscan/releases/tag/top500-2026-11-06),
+  from `releases/top500-2026-11-06/`; `library-report.md` (2.5 MB) is
+  larger than the repository's 500 KB file limit, so it is a release asset
+  only.
 - **C.10** *(maintainer input)* Follow up [Static copies in one wheel:
   pyarrow 26.0.0](#static-copies-in-one-wheel-pyarrow-2600). Manual
   steps first: repeat the binding check on the cp312 wheel; a Parquet
