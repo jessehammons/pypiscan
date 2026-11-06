@@ -7,7 +7,7 @@ list (downloads over the previous 30 days) with a wheel for CPython 3.12 on
 manylinux x86_64 with glibc 2.28 or older, which walked the list to rank
 3252. Each project's latest release at the time is pinned.
 
-- Wheels resolved from PyPI on RESOLVE_DATE; reports generated on
+- Wheels resolved from PyPI on 2026-10-25 (UTC); reports generated on
   2026-11-06 (UTC), episode `top500-c9`.
 - Tool: pypiscan at commit 39d1d0c (its code is main's cbd6978).
 - Package list sha256 `b97c851dca5b4600811e81faa72687c3d083407a89ae74a1f999507d8f1b9d6c`;
