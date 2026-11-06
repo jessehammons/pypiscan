@@ -1519,8 +1519,9 @@ versions (audioop-lts, pyyaml-ft, backports-zoneinfo, typed-ast).
   `top500-p1`, libpng's wheels went from 9 to 10 and the unmapped prefixes
   from 299 to 294, all from torchvision's `.`-joined prefixes, cut since
   C.6 (see [Mini-roadmap: checkpoint](#mini-roadmap-checkpoint)): libjpeg,
-  libpng16, libsharpyuv and libwebp now join mapped prefixes, and
-  `libnvjpeg` one already listed.
+  libpng16, libsharpyuv and libwebp now match mapped prefixes, libnvjpeg
+  was already unmapped, and libcudart and libz replace their hashed
+  forms.
 - The top-100 staleness run (`stale100`, see [The staleness
   report](#the-staleness-report)) compared 27 bundled libraries with their
   upstream releases on each wheel's upload day. On their own release lines,

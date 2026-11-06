@@ -1,15 +1,14 @@
 # pypiscan top-500 probe, 2026-11-06
 
-What the C libraries bundled as shared libraries in the `.libs/`
-directories of the wheels of 500 popular PyPI projects are, and what those
-wheels' SBOMs claim. The packages are the first 500 projects on the top-pypi-packages
+The shared C libraries that the wheels of 500 popular PyPI projects bundle
+in their `.libs/` directories, and what those wheels' SBOMs claim. The packages are the first 500 projects on the top-pypi-packages
 list (downloads over the previous 30 days) with a wheel for CPython 3.12 on
 manylinux x86_64 with glibc 2.28 or older, which walked the list to rank
 3252. Each project's latest release at the time is pinned.
 
 - Wheels resolved from PyPI on 2026-10-25 (UTC); reports generated on
   2026-11-06 (UTC), episode `top500-c9`.
-- Tool: pypiscan at commit 39d1d0c (its code is main's cbd6978).
+- Tool: pypiscan code at commit cbd6978 on main.
 - Package list sha256 `b97c851dca5b4600811e81faa72687c3d083407a89ae74a1f999507d8f1b9d6c`;
   library map sha256 `4ee69a1018b7df6d1d13211b5149843946719b9d13976a99e11ea36ad1fb81a8`.
 
